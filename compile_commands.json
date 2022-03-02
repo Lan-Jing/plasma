@@ -1,0 +1,97 @@
+[
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -I/root/code/plasma/common/thirdparty/ae -Wno-typedef-redefinition -Werror -o event_loop.o /root/code/plasma/common/event_loop.c",
+        "directory": "/root/code/plasma/common",
+        "file": "/root/code/plasma/common/event_loop.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -I/root/code/plasma/common/thirdparty/ae -Wno-typedef-redefinition -Werror -o common.o /root/code/plasma/common/common.c",
+        "directory": "/root/code/plasma/common",
+        "file": "/root/code/plasma/common/common.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -I/root/code/plasma/common/thirdparty/ae -Wno-typedef-redefinition -Werror -o task.o /root/code/plasma/common/task.c",
+        "directory": "/root/code/plasma/common",
+        "file": "/root/code/plasma/common/task.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -I/root/code/plasma/common/thirdparty/ae -Wno-typedef-redefinition -Werror -o io.o /root/code/plasma/common/io.c",
+        "directory": "/root/code/plasma/common",
+        "file": "/root/code/plasma/common/io.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -I/root/code/plasma/common/thirdparty/ae -Wno-typedef-redefinition -Werror -o state/redis.o /root/code/plasma/common/state/redis.c",
+        "directory": "/root/code/plasma/common",
+        "file": "/root/code/plasma/common/state/redis.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -fPIC -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -I/root/code/plasma/common/thirdparty/ae -Wno-typedef-redefinition -Werror -o thirdparty/ae/ae.o /root/code/plasma/common/thirdparty/ae/ae.c",
+        "directory": "/root/code/plasma/common",
+        "file": "/root/code/plasma/common/thirdparty/ae/ae.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -o build/plasma_store /root/code/plasma/src/plasma_store.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/plasma_store.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -o build/plasma_store /root/code/plasma/src/fling.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/fling.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -o build/plasma_store /root/code/plasma/src/malloc.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/malloc.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o build/plasma_manager /root/code/plasma/src/plasma_manager.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/plasma_manager.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o build/plasma_manager /root/code/plasma/src/plasma_client.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/plasma_client.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o build/plasma_manager /root/code/plasma/src/fling.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/fling.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -fPIC -o build/plasma_client.so /root/code/plasma/src/plasma_client.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/plasma_client.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -fPIC -o build/plasma_client.so /root/code/plasma/src/fling.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/fling.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -o build/example /root/code/plasma/src/plasma_client.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/plasma_client.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -o build/example /root/code/plasma/src/example.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/example.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty common/build/libcommon.a -o build/example /root/code/plasma/src/fling.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/fling.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -o src/plasma_client.o /root/code/plasma/src/plasma_client.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/plasma_client.c"
+    },
+    {
+        "command": "cc -c -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I/root/code/plasma -I/root/code/plasma/common -I/root/code/plasma/common/thirdparty -o src/fling.o /root/code/plasma/src/fling.c",
+        "directory": "/root/code/plasma",
+        "file": "/root/code/plasma/src/fling.c"
+    }
+]

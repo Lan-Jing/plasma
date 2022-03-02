@@ -9,7 +9,7 @@ typedef struct plasma_connection plasma_connection;
  * This is used by the Plasma Client to send a request to the Plasma Store or
  * the Plasma Manager.
  *
- * @param conn The file descriptor to use to send the request.
+ * @param fd The file descriptor to use to send the request.
  * @param type The type of request.
  * @param req The address of the request to send.
  * @return Void.
