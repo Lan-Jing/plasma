@@ -175,9 +175,11 @@ client_object_connection *add_object_connection(client_connection *client_conn,
   HASH_FIND(fetch_hh, client_conn->manager_state->fetch_connections, &object_id,
             sizeof(object_id), fetch_connections);
   LOG_DEBUG("Registering fd %d for fetch.", client_conn->fd);
+  // Append object_conn to fetch_connections
   if (!fetch_connections) {
     fetch_connections = NULL;
     LL_APPEND(fetch_connections, object_conn);
+  // To ensure that only one connection is hashed for a given object_id
     HASH_ADD(fetch_hh, client_conn->manager_state->fetch_connections, object_id,
              sizeof(object_id), fetch_connections);
   } else {
@@ -196,10 +198,13 @@ void remove_object_connection(client_connection *client_conn,
             &(object_conn->object_id), sizeof(object_conn->object_id),
             object_conns);
   CHECK(object_conns);
+
+  // Count the linked list fetch_connections.
   int len;
   client_object_connection *tmp;
   LL_COUNT(object_conns, tmp, len);
   if (len == 1) {
+  // the object_id is no longer referenced
     HASH_DELETE(fetch_hh, client_conn->manager_state->fetch_connections,
                 object_conns);
   }
@@ -330,7 +335,7 @@ void send_queued_request(event_loop *loop,
     memcpy(manager_req.addr, conn->manager_state->addr,
            sizeof(manager_req.addr));
     manager_req.port = conn->manager_state->port;
-    plasma_send_request(conn->fd, buf->type, &manager_req);
+    plasma_send_request(conn->fd, PLASMA_TRANSFER, &manager_req);
     break;
   case PLASMA_DATA:
     LOG_DEBUG("Transferring object to manager");
@@ -372,6 +377,7 @@ int read_object_chunk(client_connection *conn, plasma_request_buffer *buf) {
   } else if (r == 0) {
     LOG_DEBUG("end of file");
   } else {
+    // Possible to read r < s on success.
     conn->cursor += r;
   }
   /* If the cursor is equal to the full object size, reset the cursor and we're
@@ -483,6 +489,8 @@ void process_transfer_request(event_loop *loop,
   buf->data_size = data_size;
   buf->metadata_size = metadata_size;
 
+  /* try to fetch a established connection to the other manager, 
+     create one if it doesn't exist. */
   UT_string *ip_addr;
   utstring_new(ip_addr);
   utstring_printf(ip_addr, "%d.%d.%d.%d", addr[0], addr[1], addr[2], addr[3]);
@@ -676,19 +684,27 @@ void process_message(event_loop *loop,
   read_message(client_sock, &type, &length, (uint8_t **) &req);
 
   switch (type) {
+  /* To start sending data to another manager at addr:port
+      This will initiate another plasma_request of type PLASMA_DATA */
   case PLASMA_TRANSFER:
     process_transfer_request(loop, req->object_ids[0], req->addr, req->port,
                              conn);
     break;
-  case PLASMA_DATA:
+  /* To start receiving data from another manager on client_sock
+     This will read multiple chunks by calling process_data_chunk */
+	case PLASMA_DATA:
     LOG_DEBUG("Starting to stream data");
     process_data_request(loop, client_sock, req->object_ids[0], req->data_size,
                          req->metadata_size, conn);
     break;
+  /* To fetch an object from the cluster(if not present locally)
+     This will query the redis table then invoke multiple PLASMA_TRANSFER */
   case PLASMA_FETCH:
     LOG_DEBUG("Processing fetch");
     process_fetch_requests(conn, req->num_object_ids, req->object_ids);
     break;
+  /* To seal an object(after a successful transfer)
+     This will notify the db so other managers can see the object. */
   case PLASMA_SEAL:
     LOG_DEBUG("Publishing to object table from DB client %d.",
               get_client_id(conn->manager_state->db));

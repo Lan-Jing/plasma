@@ -221,6 +221,7 @@ int get_object(client *client_context,
       HASH_ADD(handle, plasma_state->objects_notify, object_id,
                sizeof(object_id), notify_entry);
     }
+		/* Add the current client into the list of waiting_clients */
     utarray_push_back(notify_entry->waiting_clients, &client_context);
   }
   return OBJECT_NOT_FOUND;

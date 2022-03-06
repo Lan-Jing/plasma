@@ -180,8 +180,7 @@ void plasma_create(plasma_connection *conn,
   /* The metadata should come right after the data. */
   CHECK(object->metadata_offset == object->data_offset + data_size);
   *data = lookup_or_mmap(conn, fd, object->handle.store_fd,
-                         object->handle.mmap_size) +
-          object->data_offset;
+                         object->handle.mmap_size) + object->data_offset;
   /* If plasma_create is being called from a transfer, then we will not copy the
    * metadata here. The metadata will be written along with the data streamed
    * from the transfer. */
