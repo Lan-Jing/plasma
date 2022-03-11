@@ -341,12 +341,13 @@ void send_queued_request(event_loop *loop,
     LOG_DEBUG("Transferring object to manager");
     if (conn->cursor == 0) {
       /* If the cursor is zero, we haven't sent any requests for this object
-       * yet,
-       * so send the initial PLASMA_DATA request. */
+       * yet, so send the initial PLASMA_DATA request.
+       * The other manager should create an object upon receiving this request */
       manager_req.data_size = buf->data_size;
       manager_req.metadata_size = buf->metadata_size;
       plasma_send_request(conn->fd, PLASMA_DATA, &manager_req);
     }
+    // first try with RDMA send.
     write_object_chunk(conn, buf);
     break;
   default:
@@ -555,6 +556,10 @@ void request_transfer_from(client_connection *client_conn,
   parse_ip_addr_port(object_conn->manager_vector[object_conn->next_manager],
                      addr, &port);
 
+	/* Connect to the given manager, prepare a transfer request and send it.
+		 exchange IB info through plasma request,
+		 register memory region with the allocated buffer.
+	*/
   client_connection *manager_conn =
       get_manager_connection(client_conn->manager_state, addr, port);
   plasma_request_buffer *transfer_request =
