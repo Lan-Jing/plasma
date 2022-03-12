@@ -448,9 +448,10 @@ client_connection *get_manager_connection(plasma_manager_state *state,
   if (!manager_conn) {
     /* If we don't already have a connection to this manager, start one. */
     int fd = plasma_manager_connect(ip_addr, port);
+    CHECK(fd >= 0);
+    setup_ib_conn()
     /* TODO(swang): Handle the case when connection to this manager was
      * unsuccessful. */
-    CHECK(fd >= 0);
     manager_conn = malloc(sizeof(client_connection));
     manager_conn->fd = fd;
     manager_conn->manager_state = state;
@@ -736,6 +737,7 @@ client_connection *new_client_connection(event_loop *loop,
                                          void *context,
                                          int events) {
   int new_socket = accept_client(listener_sock);
+  setup_ib_conn();
   /* Create a new data connection context per client. */
   client_connection *conn = malloc(sizeof(client_connection));
   conn->manager_state = (plasma_manager_state *) context;

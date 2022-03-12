@@ -3,12 +3,15 @@
 
 #include <bits/stdint-uintn.h>
 #include <infiniband/verbs.h>
-#include <byteswap.h>
 #include <arpa/inet.h>
 
+#include "io.h"
 #include "plasma_manager.h"
 #include "uthash.h"
-#include "utarray.h"
+
+#define IB_MTU IBV_MTU_4096
+#define IB_PORT 1
+#define IB_SL   0
 
 /* IB info for connection between two managers 
 	 Should contain extra info for indexing */
@@ -42,10 +45,13 @@ typedef struct {
 }__attribute__((packed)) QP_info;
 
 /* This function moves qp from state reset to rts */
-int bringup_qp();
+int bringup_qp(struct ibv_qp *qp, QP_info qp_info);
 
 /* Bring up IB connections of a pair of managers */
-int setup_ib_conn();
+int sock_send_qp_info(int fd, QP_info  *local_qp_info);
+int sock_recv_qp_info(int fd, QP_info *remote_qp_info);
+int setup_ib_conn(IB_state *ib_state, enum manager_state mstate, 
+									int fd, char* ip_addr_port);
 void free_ib_conn();
 
 /* Prepare IB connections for one process, e.g. device query */
