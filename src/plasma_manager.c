@@ -27,6 +27,7 @@
 #include "utstring.h"
 #include "common.h"
 #include "io.h"
+#include "ib.h"
 #include "event_loop.h"
 #include "plasma.h"
 #include "plasma_client.h"
@@ -37,23 +38,27 @@
 typedef struct client_object_connection client_object_connection;
 
 struct plasma_manager_state {
+  /** Our address. */
+  uint8_t addr[4];
+  /** Our port. */
+  int port;
   /** Event loop. */
   event_loop *loop;
+  db_handle *db;
   /** Connection to the local plasma store for reading or writing data. */
   plasma_connection *plasma_conn;
   /** Hash table of all contexts for active connections to
    *  other plasma managers. These are used for writing data to
    *  other plasma stores. */
   client_connection *manager_connections;
-  db_handle *db;
-  /** Our address. */
-  uint8_t addr[4];
-  /** Our port. */
-  int port;
   /** Hash table of outstanding fetch requests. The key is
    *  object id, value is a list of connections to the clients
    *  who are blocking on a fetch of this object. */
   client_object_connection *fetch_connections;
+#ifdef IB
+  /* Struct holding IB contexts for this manager. */
+  IB_state *ib_state;
+#endif
 };
 
 plasma_manager_state *g_manager_state = NULL;
@@ -234,6 +239,10 @@ plasma_manager_state *init_plasma_manager_state(const char *store_socket_name,
   state->plasma_conn = plasma_connect(store_socket_name, NULL, 0);
   state->manager_connections = NULL;
   state->fetch_connections = NULL;
+  sscanf(manager_addr, "%hhu.%hhu.%hhu.%hhu", &state->addr[0], &state->addr[1],
+         &state->addr[2], &state->addr[3]);
+  state->port = manager_port;
+
   if (db_addr) {
     state->db = db_connect(db_addr, db_port, "plasma_manager", manager_addr,
                            manager_port);
@@ -244,9 +253,11 @@ plasma_manager_state *init_plasma_manager_state(const char *store_socket_name,
     state->db = NULL;
     LOG_DEBUG("No db connection specified");
   }
-  sscanf(manager_addr, "%hhu.%hhu.%hhu.%hhu", &state->addr[0], &state->addr[1],
-         &state->addr[2], &state->addr[3]);
-  state->port = manager_port;
+#ifdef IB  
+  IB_state *ib_state = (IB_state*)malloc(sizeof(IB_state));
+  int res = setup_ib(ib_state);
+  CHECKM(res == 0, "Failed to set up IB for manager.");
+#endif
   return state;
 }
 
@@ -271,6 +282,10 @@ void destroy_plasma_manager_state(plasma_manager_state *state) {
   free(state->plasma_conn);
   event_loop_destroy(state->loop);
   free(state);
+
+#ifdef IB
+  free_ib(ib_state);
+#endif
 }
 
 event_loop *get_event_loop(plasma_manager_state *state) {
@@ -449,7 +464,9 @@ client_connection *get_manager_connection(plasma_manager_state *state,
     /* If we don't already have a connection to this manager, start one. */
     int fd = plasma_manager_connect(ip_addr, port);
     CHECK(fd >= 0);
-    setup_ib_conn()
+  #ifdef IB
+    setup_ib_conn(state->ib_state, MANAGER_CLIENT, fd);
+  #endif
     /* TODO(swang): Handle the case when connection to this manager was
      * unsuccessful. */
     manager_conn = malloc(sizeof(client_connection));
@@ -737,17 +754,21 @@ client_connection *new_client_connection(event_loop *loop,
                                          void *context,
                                          int events) {
   int new_socket = accept_client(listener_sock);
-  setup_ib_conn();
   /* Create a new data connection context per client. */
   client_connection *conn = malloc(sizeof(client_connection));
   conn->manager_state = (plasma_manager_state *) context;
+  conn->fd = new_socket;
   conn->cursor = 0;
   conn->transfer_queue = NULL;
-  conn->fd = new_socket;
   conn->active_objects = NULL;
   conn->num_return_objects = 0;
   event_loop_add_file(loop, new_socket, EVENT_LOOP_READ, process_message, conn);
   LOG_DEBUG("New plasma manager connection with fd %d", new_socket);
+
+#ifdef IB
+  setup_ib_conn(conn->manager_state->ib_state, MANAGER_SERVER, conn->fd);
+#endif
+
   return conn;
 }
 

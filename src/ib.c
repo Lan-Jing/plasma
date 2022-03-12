@@ -1,13 +1,11 @@
-#include <bits/stdint-uintn.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
-#include <arpa/inet.h>
 
-#include "ib.h"
+#include "uthash.h"
 #include "common.h"
 #include "io.h"
-#include "uthash.h"
+#include "ib.h"
 
 int sock_send_qp_info(int fd, QP_info *local_qp_info)
 {
@@ -90,10 +88,10 @@ int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
 }
 
 int setup_ib_conn(IB_state *ib_state, enum manager_state mstate,
-                  int fd, char *ip_addr_port)
+                  int fd)
 {
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
-  pair->ip_addr_port = strdup(ip_addr_port);
+  pair->sock_fd = fd;
   pair->bufsize = BUFSIZE;
   pair->ib_buf  = (uint8_t*)memalign(4096, BUFSIZE);
   CHECKM(pair->ib_buf != NULL, "Failed to allocate IB buffer.");
@@ -128,18 +126,37 @@ int setup_ib_conn(IB_state *ib_state, enum manager_state mstate,
     res = sock_recv_qp_info(fd, &remote_qp_info);
   } else {
     res = sock_recv_qp_info(fd, &remote_qp_info);
-    res = sock_recv_qp_info(fd, &remote_qp_info);
+    res = sock_send_qp_info(fd, &local_qp_info);
   }
   res = bringup_qp(pair->qp, remote_qp_info);
 
-  HASH_ADD_KEYPTR(ibpair_hh, ib_state->pairs, 
-                  pair->ip_addr_port, strlen(pair->ip_addr_port),
-                  pair);
+  HASH_ADD_INT(ib_state->pairs, sock_fd, pair);
+  LOG_DEBUG("Establish IB Connection to <%d:%d>", remote_qp_info.lid, remote_qp_info.qp_num);
   return 0;
+}
+
+void free_ib_conn(IB_state *ib_state, int fd)
+{
+  IB_pair_info *pair;
+  HASH_FIND_INT(ib_state->pairs, &fd, pair);
+  if(pair == NULL) {
+    LOG_DEBUG("IB Connection to fd:%d not found.", fd);
+    return ;
+  }
+  HASH_DEL(ib_state->pairs, pair);
+
+  if(pair->qp != NULL)
+    ibv_destroy_qp(pair->qp);
+  if(pair->mr != NULL)
+    ibv_dereg_mr(pair->mr);
+  if(pair->ib_buf != NULL)
+    free(pair->ib_buf);
+  free(pair);
 }
 
 int setup_ib(IB_state *ib_state)
 {
+  CHECKM(ib_state != NULL, "NULL IB state passed in.");
   int res = 0;
   struct ibv_device **dev_list = NULL;
 
