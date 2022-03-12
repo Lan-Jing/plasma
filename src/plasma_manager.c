@@ -574,10 +574,10 @@ void request_transfer_from(client_connection *client_conn,
   parse_ip_addr_port(object_conn->manager_vector[object_conn->next_manager],
                      addr, &port);
 
-	/* Connect to the given manager, prepare a transfer request and send it.
-		 exchange IB info through plasma request,
-		 register memory region with the allocated buffer.
-	*/
+  /* Connect to the given manager, prepare a transfer request and send it.
+     exchange IB info through plasma request,
+     register memory region with the allocated buffer.
+  */
   client_connection *manager_conn =
       get_manager_connection(client_conn->manager_state, addr, port);
   plasma_request_buffer *transfer_request =
@@ -715,7 +715,7 @@ void process_message(event_loop *loop,
     break;
   /* To start receiving data from another manager on client_sock
      This will read multiple chunks by calling process_data_chunk */
-	case PLASMA_DATA:
+  case PLASMA_DATA:
     LOG_DEBUG("Starting to stream data");
     process_data_request(loop, client_sock, req->object_ids[0], req->data_size,
                          req->metadata_size, conn);
