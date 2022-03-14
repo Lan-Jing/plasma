@@ -1,7 +1,6 @@
 #ifndef IB_H
 #define IB_H
 
-#include <bits/stdint-uintn.h>
 #include <infiniband/verbs.h>
 #include <arpa/inet.h>
 
@@ -31,7 +30,7 @@ typedef struct {
   struct ibv_context *ctx;
   struct ibv_pd *pd;
   struct ibv_cq *cq;
-  struct ibv_device_arrt dev_attr;
+  struct ibv_device_attr dev_attr;
   struct ibv_port_attr port_attr;
 
   // a list of pair info here.

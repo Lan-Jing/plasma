@@ -28,7 +28,6 @@
 #include "common.h"
 #include "io.h"
 #include "ib.h"
-#include "event_loop.h"
 #include "plasma.h"
 #include "plasma_client.h"
 #include "plasma_manager.h"

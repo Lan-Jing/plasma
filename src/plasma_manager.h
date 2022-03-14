@@ -3,6 +3,7 @@
 
 #include <poll.h>
 #include "utarray.h"
+#include "event_loop.h"
 
 #ifndef RAY_NUM_RETRIES
 #define NUM_RETRIES 5

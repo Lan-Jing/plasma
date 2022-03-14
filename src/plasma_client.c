@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <time.h>
 
 #include "common.h"
 #include "io.h"
@@ -321,7 +322,9 @@ plasma_connection *plasma_connect(const char *store_socket_name,
       break;
     }
     /* Sleep for 100 milliseconds. */
-    usleep(100000);
+    // usleep(100000);
+    struct timespec ts = {.tv_sec=0, .tv_nsec=100000,};
+    nanosleep(&ts, NULL);
   }
   /* If we could not connect to the Plasma store, exit. */
   if (!connected_successfully) {
@@ -401,7 +404,9 @@ int plasma_manager_connect(const char *ip_addr, int port) {
       break;
     }
     /* Sleep for 100 milliseconds. */
-    usleep(100000);
+    // usleep(100000);
+    struct timespec ts = {.tv_sec=0, .tv_nsec=100000,};
+    nanosleep(&ts, NULL);
   }
   return fd;
 }
