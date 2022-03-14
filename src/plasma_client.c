@@ -336,6 +336,12 @@ plasma_connection *plasma_connect(const char *store_socket_name,
     if (result->manager_conn < 0) {
       LOG_ERR("Could not connect to Plasma manager %s:%d", manager_addr,
               manager_port);
+    } else {
+    #ifdef IB
+      // tell the manager that it connects to a client process.
+      char message = 'C';
+      write_bytes(result->manager_conn, (uint8_t*)&message, 1);
+    #endif
     }
   } else {
     result->manager_conn = -1;

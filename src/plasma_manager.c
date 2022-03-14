@@ -465,6 +465,8 @@ client_connection *get_manager_connection(plasma_manager_state *state,
     int fd = plasma_manager_connect(ip_addr, port);
     CHECK(fd >= 0);
   #ifdef IB
+    char message = 'M';
+    write_bytes(fd, (uint8_t*)&message, 1);
     setup_ib_conn(state->ib_state, MANAGER_CLIENT, fd);
   #endif
     /* TODO(swang): Handle the case when connection to this manager was
@@ -766,7 +768,14 @@ client_connection *new_client_connection(event_loop *loop,
   LOG_DEBUG("New plasma manager connection with fd %d", new_socket);
 
 #ifdef IB
-  setup_ib_conn(conn->manager_state->ib_state, MANAGER_SERVER, conn->fd);
+  char conn_type;
+  read_bytes(conn->fd, (uint8_t*)&conn_type, 1);
+  if(conn_type == 'C') {
+    LOG_DEBUG("Manager connected to a client process.");
+  } else {
+    LOG_DEBUG("Manager connected to another manager process.");
+    setup_ib_conn(conn->manager_state->ib_state, MANAGER_SERVER, conn->fd);
+  }
 #endif
 
   return conn;
