@@ -1,3 +1,5 @@
+#ifdef IB
+
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,13 +89,12 @@ int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
   return 0;
 }
 
-int setup_ib_conn(IB_state *ib_state, enum manager_state mstate,
-                  int fd)
+int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
 {
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
   pair->sock_fd = fd;
   pair->bufsize = BUFSIZE;
-  pair->ib_buf  = (uint8_t*)memalign(4096, BUFSIZE);
+  pair->ib_buf  = (uint8_t*)malloc(BUFSIZE);
   CHECKM(pair->ib_buf != NULL, "Failed to allocate IB buffer.");
 
   pair->mr = ibv_reg_mr(ib_state->pd, (void*)pair->ib_buf, pair->bufsize,
@@ -116,19 +117,18 @@ int setup_ib_conn(IB_state *ib_state, enum manager_state mstate,
   pair->qp = ibv_create_qp(ib_state->pd, &qp_init_attr);
   CHECKM(pair->qp != NULL, "Failed to create qp.");
 
-  int res = 0;
   QP_info remote_qp_info, local_qp_info = {
     .lid = ib_state->port_attr.lid,
     .qp_num = pair->qp->qp_num,
   };
   if(mstate == MANAGER_CLIENT) {
-    res = sock_send_qp_info(fd, &local_qp_info);
-    res = sock_recv_qp_info(fd, &remote_qp_info);
+    sock_send_qp_info(fd, &local_qp_info);
+    sock_recv_qp_info(fd, &remote_qp_info);
   } else {
-    res = sock_recv_qp_info(fd, &remote_qp_info);
-    res = sock_send_qp_info(fd, &local_qp_info);
+    sock_recv_qp_info(fd, &remote_qp_info);
+    sock_send_qp_info(fd, &local_qp_info);
   }
-  res = bringup_qp(pair->qp, remote_qp_info);
+  bringup_qp(pair->qp, remote_qp_info);
 
   HASH_ADD_INT(ib_state->pairs, sock_fd, pair);
   LOG_DEBUG("Establish IB Connection to <%d:%d>", remote_qp_info.lid, remote_qp_info.qp_num);
@@ -196,8 +196,6 @@ void free_ib(IB_state *ib_state)
   if(ib_state->cq != NULL) 
     ibv_destroy_cq(ib_state->cq);
 
-  // should destroy qp info list here
-  
   if(ib_state->pd != NULL)
     ibv_dealloc_pd(ib_state->pd);
 
@@ -206,3 +204,5 @@ void free_ib(IB_state *ib_state)
 
   free(ib_state);
 }
+
+#endif // IB

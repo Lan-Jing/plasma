@@ -226,6 +226,7 @@ void parse_ip_addr_port(const char *ip_addr_port, char *ip_addr, int *port) {
   int parsed = sscanf(ip_addr_port, "%15[0-9.]:%5[0-9]", ip_addr, port_str);
   CHECK(parsed == 2);
   *port = atoi(port_str);
+  printf("%s, %d\n", ip_addr, *port);
 }
 
 plasma_manager_state *init_plasma_manager_state(const char *store_socket_name,
@@ -283,7 +284,7 @@ void destroy_plasma_manager_state(plasma_manager_state *state) {
   free(state);
 
 #ifdef IB
-  free_ib(ib_state);
+  free_ib(state->ib_state);
 #endif
 }
 
@@ -466,7 +467,8 @@ client_connection *get_manager_connection(plasma_manager_state *state,
   #ifdef IB
     char message = 'M';
     write_bytes(fd, (uint8_t*)&message, 1);
-    setup_ib_conn(state->ib_state, MANAGER_CLIENT, fd);
+    printf("here\n");
+    setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
   #endif
     /* TODO(swang): Handle the case when connection to this manager was
      * unsuccessful. */
@@ -771,9 +773,11 @@ client_connection *new_client_connection(event_loop *loop,
   read_bytes(conn->fd, (uint8_t*)&conn_type, 1);
   if(conn_type == 'C') {
     LOG_DEBUG("Manager connected to a client process.");
+    printf("Manager at %d connected to a client process.\n", conn->fd);
   } else {
     LOG_DEBUG("Manager connected to another manager process.");
-    setup_ib_conn(conn->manager_state->ib_state, MANAGER_SERVER, conn->fd);
+    printf("Manager at %d connected to another manager process.\n", conn->fd);
+    setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER);
   }
 #endif
 

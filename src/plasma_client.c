@@ -322,7 +322,6 @@ plasma_connection *plasma_connect(const char *store_socket_name,
       break;
     }
     /* Sleep for 100 milliseconds. */
-    // usleep(100000);
     struct timespec ts = {.tv_sec=0, .tv_nsec=100000,};
     nanosleep(&ts, NULL);
   }
@@ -404,7 +403,6 @@ int plasma_manager_connect(const char *ip_addr, int port) {
       break;
     }
     /* Sleep for 100 milliseconds. */
-    // usleep(100000);
     struct timespec ts = {.tv_sec=0, .tv_nsec=100000,};
     nanosleep(&ts, NULL);
   }

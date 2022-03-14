@@ -2,12 +2,17 @@ CC = gcc
 CFLAGS = -g -Wall --std=c99 -D_XOPEN_SOURCE=500 -D_POSIX_C_SOURCE=200809L -I. -Icommon -Icommon/thirdparty
 TEST_CFLAGS = -DPLASMA_TEST=1 -Isrc
 BUILD = build
+IBFLAGS = -DIB -libverbs
 
 all: $(BUILD)/plasma_store $(BUILD)/plasma_manager $(BUILD)/plasma_client.so $(BUILD)/example $(BUILD)/libplasma_client.a
 
 debug: FORCE
 debug: CFLAGS += -DRAY_COMMON_DEBUG=1
 debug: all
+
+# Compile for IB support
+ib: CFLAGS += $(IBFLAGS) -DRAY_COMMON_DEBUG=1
+ib: all
 
 clean:
 	cd common; make clean
@@ -20,8 +25,8 @@ $(BUILD)/manager_tests: test/manager_tests.c src/plasma.h src/plasma_client.h sr
 $(BUILD)/plasma_store: src/plasma_store.c src/plasma.h src/fling.h src/fling.c src/malloc.c src/malloc.h thirdparty/dlmalloc.c common
 	$(CC) $(CFLAGS) src/plasma_store.c src/fling.c src/malloc.c common/build/libcommon.a -o $(BUILD)/plasma_store
 
-$(BUILD)/plasma_manager: src/plasma_manager.c src/plasma.h src/plasma_client.c src/fling.h src/fling.c common
-	$(CC) $(CFLAGS) src/plasma_manager.c src/plasma_client.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
+$(BUILD)/plasma_manager: src/plasma_manager.c src/ib.c src/ib.h src/plasma.h src/plasma_client.c src/fling.h src/fling.c common
+	$(CC) $(CFLAGS) src/plasma_manager.c src/ib.c src/plasma_client.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
 
 $(BUILD)/plasma_client.so: src/plasma_client.c src/fling.h src/fling.c common
 	$(CC) $(CFLAGS) src/plasma_client.c src/fling.c common/build/libcommon.a -fPIC -shared -o $(BUILD)/plasma_client.so

@@ -30,6 +30,8 @@ int main(int argc, char *argv[]) {
     case 'c':
       assert(conn != NULL);
       plasma_create(conn, id, 100, NULL, 0, &data);
+      char *str = "hello world\n";
+      memcpy(data, str, strlen(str));
       break;
     case 'f':
       assert(conn != NULL);
@@ -37,6 +39,7 @@ int main(int argc, char *argv[]) {
       break;
     case 'g':
       plasma_get(conn, id, &size, &data, NULL, NULL);
+      printf("%s", (char*)data);
       break;
     default:
       abort();

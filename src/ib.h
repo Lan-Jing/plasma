@@ -22,7 +22,7 @@ typedef struct {
 
   // key and handle to construct a hash table
   int sock_fd;
-  UT_hash_handle ibpair_hh;
+  UT_hash_handle hh;
 } IB_pair_info;
 
 /* IB info for one manager process. Reuse for multiple queue pairs */
@@ -50,8 +50,7 @@ int bringup_qp(struct ibv_qp *qp, QP_info qp_info);
 /* Bring up IB connections of a pair of managers */
 int sock_send_qp_info(int fd, QP_info  *local_qp_info);
 int sock_recv_qp_info(int fd, QP_info *remote_qp_info);
-int setup_ib_conn(IB_state *ib_state, enum manager_state mstate, 
-                  int fd);
+int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate);
 void free_ib_conn(IB_state *ib_state, int fd);
 
 /* Prepare IB connections for one process, e.g. device query */
