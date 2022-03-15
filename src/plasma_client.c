@@ -343,6 +343,7 @@ plasma_connection *plasma_connect(const char *store_socket_name,
       // tell the manager that it connects to a client process.
       char message = 'C';
       write_bytes(result->manager_conn, (uint8_t*)&message, 1);
+      LOG_DEBUG("Client connected to Plasma manager");
     #endif
     }
   } else {
