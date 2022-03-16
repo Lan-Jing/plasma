@@ -253,8 +253,8 @@ plasma_manager_state *init_plasma_manager_state(const char *store_socket_name,
     LOG_DEBUG("No db connection specified");
   }
 #ifdef IB  
-  IB_state *ib_state = (IB_state*)malloc(sizeof(IB_state));
-  int res = setup_ib(ib_state);
+  state->ib_state = (IB_state*)malloc(sizeof(IB_state));
+  int res = setup_ib(state->ib_state);
   CHECKM(res == 0, "Failed to set up IB for manager.");
   LOG_DEBUG("Successful IB setup on %s:%d", manager_addr, manager_port);
 #endif
@@ -362,8 +362,11 @@ void send_queued_request(event_loop *loop,
       manager_req.metadata_size = buf->metadata_size;
       plasma_send_request(conn->fd, PLASMA_DATA, &manager_req);
     }
-    // first try with RDMA send.
+  #ifdef IB
+    ib_send_object_chunk(conn, buf);
+  #else
     write_object_chunk(conn, buf);
+  #endif
     break;
   default:
     LOG_ERR("Buffered request has unknown type.");
@@ -413,7 +416,11 @@ void process_data_chunk(event_loop *loop,
   /* Read the object chunk. */
   client_connection *conn = (client_connection *) context;
   plasma_request_buffer *buf = conn->transfer_queue;
+#ifdef IB
+  int done = ib_recv_object_chunk(conn, buf);
+#else
   int done = read_object_chunk(conn, buf);
+#endif
   if (!done) {
     return;
   }

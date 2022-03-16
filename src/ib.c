@@ -4,10 +4,69 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "uthash.h"
 #include "common.h"
+#include "plasma_client.h"
 #include "io.h"
 #include "ib.h"
+#include "state/db.h"
+#include "state/object_table.h"
+
+/* Below are duplicate definitions of some core structures
+   defined in plasma_manager.c, this allow me to program IB-relevant functions
+   inside this source file.
+*/
+typedef struct plasma_manager_state {
+  /** Our address. */
+  uint8_t addr[4];
+  /** Our port. */
+  int port;
+  /** Event loop. */
+  event_loop *loop;
+  db_handle *db;
+  /** Connection to the local plasma store for reading or writing data. */
+  plasma_connection *plasma_conn;
+  /** Hash table of all contexts for active connections to
+   *  other plasma managers. These are used for writing data to
+   *  other plasma stores. */
+  client_connection *manager_connections;
+  /** Hash table of outstanding fetch requests. The key is
+   *  object id, value is a list of connections to the clients
+   *  who are blocking on a fetch of this object. */
+  client_object_connection *fetch_connections;
+#ifdef IB
+  /* Struct holding IB contexts for this manager. */
+  IB_state *ib_state;
+#endif
+} plasma_manager_state;
+
+/* Context for a client connection to another plasma manager. */
+typedef struct client_connection {
+  /** Current state for this plasma manager. This is shared
+   *  between all client connections to the plasma manager. */
+  plasma_manager_state *manager_state;
+  /** Current position in the buffer. */
+  int64_t cursor;
+  /** Buffer that this connection is reading from. If this is a connection to
+   *  write data to another plasma store, then it is a linked
+   *  list of buffers to write. */
+  /* TODO(swang): Split into two queues, data transfers and data requests. */
+  plasma_request_buffer *transfer_queue;
+  /** File descriptor for the socket connected to the other
+   *  plasma manager. */
+  int fd;
+  /** The objects that we are waiting for and their callback
+   *  contexts, for either a fetch or a wait operation. */
+  client_object_connection *active_objects;
+  /** The number of objects that we have left to return for
+   *  this fetch or wait operation. */
+  int num_return_objects;
+  /** Fields specific to connections to plasma managers.  Key that uniquely
+   * identifies the plasma manager that we're connected to. We will use the
+   * string <address>:<port> as an identifier. */
+  char *ip_addr_port;
+  /** Handle for the uthash table. */
+  UT_hash_handle manager_hh;
+} client_connection;
 
 int sock_send_qp_info(int fd, QP_info *local_qp_info)
 {
@@ -91,11 +150,14 @@ int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
 
 int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
 {
+  CHECKM(ib_state != NULL, "Set up IB state before connecting queue pairs.");
+
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
+  pair->wc = (struct ibv_wc*)malloc(sizeof(struct ibv_wc) * CQE_NUM); // Todo: provide configuration
   pair->sock_fd = fd;
   pair->bufsize = BUFSIZE;
   pair->ib_buf  = (uint8_t*)malloc(BUFSIZE);
-  CHECKM(pair->ib_buf != NULL, "Failed to allocate IB buffer.");
+  CHECKM(pair->ib_buf != NULL, "Failed to allocate IB buffer of size %d.", BUFSIZE);
 
   pair->mr = ibv_reg_mr(ib_state->pd, (void*)pair->ib_buf, pair->bufsize,
                         IBV_ACCESS_LOCAL_WRITE |
@@ -107,8 +169,8 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
     .send_cq = ib_state->cq,
     .recv_cq = ib_state->cq,
     .cap = {
-      .max_send_wr = ib_state->dev_attr.max_qp_wr*3/4,
-      .max_recv_wr = ib_state->dev_attr.max_qp_wr*3/4,
+      .max_send_wr = ib_state->dev_attr.max_qp_wr/4,
+      .max_recv_wr = ib_state->dev_attr.max_qp_wr/4,
       .max_send_sge = 1,
       .max_recv_sge = 1,
     },
@@ -151,20 +213,22 @@ void free_ib_conn(IB_state *ib_state, int fd)
     ibv_dereg_mr(pair->mr);
   if(pair->ib_buf != NULL)
     free(pair->ib_buf);
+  if(pair->wc != NULL)
+    free(pair->wc);
   free(pair);
 }
 
 int setup_ib(IB_state *ib_state)
 {
-  CHECKM(ib_state != NULL, "NULL IB state passed in.");
+  CHECKM(ib_state != NULL, "Malloc IB state before passing it in.");
+  memset(ib_state, 0, sizeof(IB_state));
+
   int res = 0;
   struct ibv_device **dev_list = NULL;
 
   dev_list = ibv_get_device_list(NULL);
   CHECKM(dev_list != NULL, "Failed to fetch ib device list.");
 
-  ib_state = (IB_state*)malloc(sizeof(IB_state));
-  memset(ib_state, 0, sizeof(IB_state));
   ib_state->ctx = ibv_open_device(*dev_list); // open the first device;
   CHECKM(ib_state->ctx != NULL, "Failed to open ib device.");
 
@@ -203,6 +267,125 @@ void free_ib(IB_state *ib_state)
     ibv_close_device(ib_state->ctx);
 
   free(ib_state);
+}
+
+int post_send(unsigned char *buf, uint32_t req_size, uint32_t lkey, 
+              uint64_t wr_id, struct ibv_qp *qp)
+{
+  struct ibv_send_wr *bad_send_wr;
+
+  struct ibv_sge list = {
+    .addr   = (uintptr_t)buf,
+    .length = req_size,
+    .lkey   = lkey
+  };
+
+  struct ibv_send_wr send_wr = {
+    .wr_id      = wr_id,
+    .sg_list    = &list,
+    .num_sge    = 1,
+    .opcode     = IBV_WR_SEND,
+    .send_flags = IBV_SEND_SIGNALED,
+  };
+
+  return ibv_post_send(qp, &send_wr, &bad_send_wr);
+}
+
+int post_recv(unsigned char *buf, uint32_t req_size, uint32_t lkey, 
+              uint64_t wr_id, struct ibv_qp *qp)
+{
+  struct ibv_recv_wr *bad_recv_wr;
+
+  struct ibv_sge list = {
+    .addr   = (uintptr_t)buf,
+    .length = req_size,
+    .lkey   = lkey
+  };
+
+  struct ibv_recv_wr recv_wr = {
+    .wr_id   = wr_id,
+    .sg_list = &list,
+    .num_sge = 1
+  };
+
+  return ibv_post_recv(qp, &recv_wr, &bad_recv_wr);
+}
+
+void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
+{
+  CHECKM(buf != NULL, "NULL buffer passed in");
+  // Using fd to hash find the IB connection state.
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->fd, pair);
+  CHECKM(pair != NULL, "Manager connected at fd %d not found", conn->fd);
+
+  uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
+  if(req_size == 0) {
+    int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq, 
+                              CQE_NUM, pair->wc);
+    LOG_DEBUG("Polling CQ, got %d CQEs", num_cqe);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("%s", ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status != IBV_WC_SUCCESS, 
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+
+    LOG_DEBUG("Writing to manager %d finished", conn->fd);
+    conn->cursor = 0;
+    plasma_release(conn->manager_state->plasma_conn, buf->object_id);
+    return ;
+  }
+
+  LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
+  LOG_DEBUG("Writing data through IB Send to manager at fd %d", conn->fd);
+  if(req_size > BUFSIZE)
+    req_size = BUFSIZE;
+  
+  memcpy(pair->ib_buf, buf->data + conn->cursor, req_size);
+  int res = post_send(pair->ib_buf, req_size, pair->mr->lkey, 
+                      (uint64_t)pair->ib_buf, pair->qp);
+  CHECKM(res == 0, "Failure detected at ibv_post_send");
+  conn->cursor += req_size;
+}
+
+int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
+{
+  CHECKM(buf != NULL, "NULL buffer passed in");
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->fd, pair);
+  CHECKM(pair != NULL, "Manager connected at fd %d not found", conn->fd);
+
+  uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
+  if(req_size == 0) {
+    int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
+                              CQE_NUM, pair->wc);
+    LOG_DEBUG("Polling CQ, got %d CQEs", num_cqe);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("%s", ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status != IBV_WC_SUCCESS,
+             "Recv failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+
+    LOG_DEBUG("Reading from manager %d finished", conn->fd);
+    conn->cursor = 0;
+    return 1;
+  }
+ 
+  LOG_DEBUG("Reading data through IB Recv from manager at fd %d to %p",
+            conn->fd, buf->data + conn->cursor);
+  if(req_size > BUFSIZE)
+    req_size = BUFSIZE;
+
+  int res = post_recv(pair->ib_buf, req_size, pair->mr->lkey,
+                      (uint64_t)pair->ib_buf, pair->qp);
+  CHECKM(res == 0, "Failure detected at ibv_post_recv");
+  memcpy(buf->data + conn->cursor, pair->ib_buf, req_size);
+  conn->cursor += req_size;
+
+  LOG_DEBUG("data received: %s", buf->data);
+  return 0;
 }
 
 #endif // IB

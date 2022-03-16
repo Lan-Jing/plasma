@@ -11,12 +11,14 @@
 #define IB_MTU  IBV_MTU_4096
 #define IB_PORT 1
 #define IB_SL   0
+#define CQE_NUM 100
 
 /* IB info for connection between any two managers 
    Should contain extra info for indexing */
 typedef struct {
   struct ibv_qp *qp;
   struct ibv_mr *mr;
+  struct ibv_wc *wc;
   uint8_t *ib_buf;
   int64_t bufsize;
 
@@ -58,7 +60,7 @@ int setup_ib(IB_state *ib_state);
 void free_ib(IB_state *ib_state);
 
 /* IB Send/Recv for a chunk of transfered buffer */
-int ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf);
-int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf);
+void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf);
+int  ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf);
 
 #endif // IB_H

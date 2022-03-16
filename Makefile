@@ -29,7 +29,7 @@ $(BUILD)/plasma_store: src/plasma_store.c src/plasma.h src/fling.h src/fling.c s
 	$(CC) $(CFLAGS) src/plasma_store.c src/fling.c src/malloc.c common/build/libcommon.a -o $(BUILD)/plasma_store
 
 $(BUILD)/plasma_manager: src/plasma_manager.c src/ib.c src/ib.h src/plasma.h src/plasma_client.c src/fling.h src/fling.c common
-	$(CC) $(CFLAGS) src/plasma_manager.c src/ib.c src/plasma_client.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
+	$(CC) $(CFLAGS) src/plasma_manager.c src/plasma_client.c src/ib.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
 
 $(BUILD)/libplasma_client.so: src/plasma_client.c src/fling.h src/fling.c common
 	$(CC) $(CFLAGS) src/plasma_client.c src/fling.c common/build/libcommon.a -fPIC -shared -o $@
