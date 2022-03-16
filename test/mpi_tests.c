@@ -13,7 +13,7 @@
 
 int size, rank;
 int object_size = 4096, 
-	fetchs_num = 100;
+	fetch_num = 100;
 object_id *ids;
 
 // Count wall time interval of two points.
@@ -24,6 +24,7 @@ uint64_t time_avg(struct timespec t, int num);
 void generate_ids(int num_objects)
 {
 	assert(ids == NULL);
+	LOG_DEBUG("Size of object_id %ld", sizeof(object_id));
 	ids = (object_id*)malloc(sizeof(object_id) * num_objects);
 	assert(ids != NULL);
 
@@ -50,7 +51,7 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 	assert(tmp != NULL);
 	memset(tmp, 1, sizeof(uint8_t)*object_size);
 
-	for(int i = 0;i < fetchs_num;i++) {
+	for(int i = 0;i < fetch_num;i++) {
 		object_id id = ids[i];
 
 		clock_gettime(CLOCK_REALTIME, &start);
@@ -61,8 +62,8 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 		assert(data != NULL);
 
 		// also call release after plasma_create
-		plasma_release(conn, id);
 		plasma_seal(conn, id);
+		plasma_release(conn, id);
 		data = NULL;
 
 		clock_gettime(CLOCK_REALTIME, &start);
@@ -77,16 +78,43 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 		plasma_delete(conn, id);
 		clock_gettime(CLOCK_REALTIME, &end);
 		time_add(&timers[2], time_diff(start, end));
+
+		// Create again for remote fetch later
+		plasma_create(conn, id, object_size, NULL, 0, &data);
+		memcpy(data, tmp, sizeof(uint8_t)*object_size);
+		plasma_seal(conn, id);
+		plasma_release(conn, id);
 	}
 
-	printf("Average latency for plasma_create: %" PRIu64 "ns\n", time_avg(timers[0], fetchs_num));
-	printf("Average latency for plasma_get   : %" PRIu64 "ns\n", time_avg(timers[1], fetchs_num));
-	printf("Average latency for plasma_delete: %" PRIu64 "ns\n", time_avg(timers[2], fetchs_num));
+	// Report latency for local store operations
+	printf("Average latency for plasma_create: %" PRIu64 "ns\n", time_avg(timers[0], fetch_num));
+	printf("Average latency for plasma_get   : %" PRIu64 "ns\n", time_avg(timers[1], fetch_num));
+	printf("Average latency for plasma_delete: %" PRIu64 "ns\n", time_avg(timers[2], fetch_num));
 	return 0;
 }
 
-int plasma_network_benchmarks()
+int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 {
+	if(!rank)
+		return 0;
+	struct timespec timer, start, end;
+	memset(&timer, 0, sizeof(struct timespec));
+
+	int *is_fetched = (int*)malloc(fetch_num * sizeof(int));
+	memset(is_fetched, 0, fetch_num * sizeof(int));
+
+	clock_gettime(CLOCK_REALTIME, &start);
+	plasma_fetch(conn, fetch_num, ids, is_fetched);
+	clock_gettime(CLOCK_REALTIME, &end);
+	time_add(&timer, time_diff(start, end));
+
+	for(int i = 0;i < fetch_num;i++)
+		assert(is_fetched[i] != 0);
+
+	// Report latency for batched fetch requests
+	printf("Average latency for %d batched fetch requests: %" PRIu64 "ns\n", fetch_num, time_avg(timer, fetch_num));
+
+	free(is_fetched);
 	return 0;
 }
 
@@ -118,7 +146,7 @@ int main(int argc, char *argv[])
 			object_size = atoi(optarg);
 			break;
 		case 'N':
-			fetchs_num = atoi(optarg);
+			fetch_num = atoi(optarg);
 			break;
 		default:
 			LOG_ERR("Unknown option %c", c);
@@ -137,18 +165,27 @@ int main(int argc, char *argv[])
 	}
 	conn = plasma_connect(store_socket_name, manager_addr, manager_port);
 	assert(conn != NULL);
-	MPI_Barrier(MPI_COMM_WORLD);	
+	MPI_Barrier(MPI_COMM_WORLD); // make sure both clients are connected.
 
-	generate_ids(fetchs_num);
-	
-	// Test remote fetch, measure bandwidth and latency.
 	if(rank == 0) {
+		generate_ids(fetch_num);
+		
 		int res = plasma_local_benchmarks(conn, (uint64_t)object_size);
 		assert(res == 0);
-	} 
 
-	int res = plasma_network_benchmarks();
-	assert(res == 0);
+		// should send object ids to the remote client. At this time no object is present on the other side.
+		MPI_Send(ids, fetch_num * sizeof(object_id), MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+	} else {
+		ids = (object_id*)malloc(sizeof(object_id) * fetch_num);
+		assert(ids != NULL);
+
+		MPI_Recv(ids, fetch_num * sizeof(object_id), MPI_BYTE, 0, 0, MPI_COMM_WORLD, NULL);
+		
+		// Test remote fetch, measure bandwidth and latency.
+		int res = plasma_network_benchmarks(conn, (uint64_t)object_size);
+		assert(res == 0);
+	}
+	MPI_Barrier(MPI_COMM_WORLD); // Keep master process alive while doing remote testing.
 
 	destroy_ids();
 	MPI_Finalize();

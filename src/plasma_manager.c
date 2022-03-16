@@ -467,7 +467,6 @@ client_connection *get_manager_connection(plasma_manager_state *state,
   #ifdef IB
     char message = 'M';
     write_bytes(fd, (uint8_t*)&message, 1);
-    printf("here\n");
     setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
   #endif
     /* TODO(swang): Handle the case when connection to this manager was

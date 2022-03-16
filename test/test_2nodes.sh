@@ -22,6 +22,9 @@ MASTER_IP=`getent hosts $1 | awk '{ print $1 }'`
 if [[ $HOSTNAME == $1 ]]; then
 	printf "Master Process on %s\n" "$HOSTNAME"
 
+	# Remove all Unix Domain Socket
+	rm 1000* || true
+
 	# kill all processes listening on port 6379 before starting redis.
 	kill -9 `lsof -t -i :6379` 
 	$ROOT_DIR/common/thirdparty/redis-3.2.3/src/redis-server --protected-mode no &
