@@ -54,6 +54,9 @@ typedef struct client_connection {
   /** File descriptor for the socket connected to the other
    *  plasma manager. */
   int fd;
+#ifdef IB
+  int slid;
+#endif
   /** The objects that we are waiting for and their callback
    *  contexts, for either a fetch or a wait operation. */
   client_object_connection *active_objects;
@@ -151,19 +154,8 @@ int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
 int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
 {
   CHECKM(ib_state != NULL, "Set up IB state before connecting queue pairs.");
-
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
-  pair->wc = (struct ibv_wc*)malloc(sizeof(struct ibv_wc) * CQE_NUM); // Todo: provide configuration
-  pair->sock_fd = fd;
-  pair->bufsize = BUFSIZE;
-  pair->ib_buf  = (uint8_t*)malloc(BUFSIZE);
-  CHECKM(pair->ib_buf != NULL, "Failed to allocate IB buffer of size %d.", BUFSIZE);
-
-  pair->mr = ibv_reg_mr(ib_state->pd, (void*)pair->ib_buf, pair->bufsize,
-                        IBV_ACCESS_LOCAL_WRITE |
-                        IBV_ACCESS_REMOTE_READ |
-                        IBV_ACCESS_REMOTE_WRITE);
-  CHECKM(pair->mr != NULL, "Failed to register Memory Region.");
+  CHECKM(pair != NULL, "Failed to allocate queue pair info");
 
   struct ibv_qp_init_attr qp_init_attr = {
     .send_cq = ib_state->cq,
@@ -190,19 +182,47 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
     sock_recv_qp_info(fd, &remote_qp_info);
     sock_send_qp_info(fd, &local_qp_info);
   }
+
+  IB_pair_info *tmp;
+  int tmp_slid = (int)remote_qp_info.lid; // HASH_FIND fails if type doesn't match
+  HASH_FIND_INT(ib_state->pairs, &tmp_slid, tmp);
+  if(tmp != NULL) {
+    LOG_DEBUG("IB connection to lid %d already exists", remote_qp_info.lid);
+    ibv_destroy_qp(pair->qp);
+    free(pair);
+    return 0;
+  } else {
+    // Now we can establish a unique connection
+    pair->slid = tmp_slid;
+  }
+
+  pair->wc = (struct ibv_wc*)malloc(sizeof(struct ibv_wc) * CQE_NUM);
+  CHECKM(pair->wc != NULL, "Failed to allocate completion buffer of size %d.", CQE_NUM);
+  
+  pair->bufsize = BUFSIZE;
+  pair->ib_buf  = (uint8_t*)malloc(BUFSIZE);
+  CHECKM(pair->ib_buf != NULL, "Failed to allocate IB buffer of size %d.", BUFSIZE);
+
+  pair->mr = ibv_reg_mr(ib_state->pd, (void*)pair->ib_buf, pair->bufsize,
+                        IBV_ACCESS_LOCAL_WRITE |
+                        IBV_ACCESS_REMOTE_READ |
+                        IBV_ACCESS_REMOTE_WRITE);
+  CHECKM(pair->mr != NULL, "Failed to register Memory Region.");
+
   bringup_qp(pair->qp, remote_qp_info);
 
-  HASH_ADD_INT(ib_state->pairs, sock_fd, pair);
-  LOG_DEBUG("Establish IB Connection to <%d:%d>", remote_qp_info.lid, remote_qp_info.qp_num);
-  return 0;
+  HASH_ADD_INT(ib_state->pairs, slid, pair);
+  LOG_DEBUG("IB port %d connects to <%d:%d>", 
+            local_qp_info.lid, pair->slid, remote_qp_info.qp_num);
+  return pair->slid;
 }
 
-void free_ib_conn(IB_state *ib_state, int fd)
+void free_ib_conn(IB_state *ib_state, int slid)
 {
-  IB_pair_info *pair;
-  HASH_FIND_INT(ib_state->pairs, &fd, pair);
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(ib_state->pairs, &slid, pair);
   if(pair == NULL) {
-    LOG_DEBUG("IB Connection to fd:%d not found.", fd);
+    LOG_DEBUG("IB Connection to lid:%d not found.", slid);
     return ;
   }
   HASH_DEL(ib_state->pairs, pair);
@@ -314,10 +334,10 @@ int post_recv(unsigned char *buf, uint32_t req_size, uint32_t lkey,
 void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
 {
   CHECKM(buf != NULL, "NULL buffer passed in");
-  // Using fd to hash find the IB connection state.
+  // Using lid to hash find the IB connection state.
   IB_pair_info *pair = NULL;
-  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->fd, pair);
-  CHECKM(pair != NULL, "Manager connected at fd %d not found", conn->fd);
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
+  CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   if(req_size == 0) {
@@ -326,19 +346,19 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     LOG_DEBUG("Polling CQ, got %d CQEs", num_cqe);
     CHECKM(num_cqe >= 0, "Failed to poll CQ");
     for(int i = 0;i < num_cqe;i++) {
-      LOG_DEBUG("%s", ibv_wc_status_str(pair->wc[i].status));
+      LOG_DEBUG("Work completion status: %s", ibv_wc_status_str(pair->wc[i].status));
       CHECKM(pair->wc[i].status != IBV_WC_SUCCESS, 
              "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
     }
 
-    LOG_DEBUG("Writing to manager %d finished", conn->fd);
+    LOG_DEBUG("Writing to manager %d finished", conn->slid);
     conn->cursor = 0;
     plasma_release(conn->manager_state->plasma_conn, buf->object_id);
     return ;
   }
 
   LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
-  LOG_DEBUG("Writing data through IB Send to manager at fd %d", conn->fd);
+  LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
   if(req_size > BUFSIZE)
     req_size = BUFSIZE;
   
@@ -353,8 +373,8 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
 {
   CHECKM(buf != NULL, "NULL buffer passed in");
   IB_pair_info *pair = NULL;
-  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->fd, pair);
-  CHECKM(pair != NULL, "Manager connected at fd %d not found", conn->fd);
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
+  CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   if(req_size == 0) {
@@ -363,18 +383,18 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     LOG_DEBUG("Polling CQ, got %d CQEs", num_cqe);
     CHECKM(num_cqe >= 0, "Failed to poll CQ");
     for(int i = 0;i < num_cqe;i++) {
-      LOG_DEBUG("%s", ibv_wc_status_str(pair->wc[i].status));
+      LOG_DEBUG("Work completion status: %s", ibv_wc_status_str(pair->wc[i].status));
       CHECKM(pair->wc[i].status != IBV_WC_SUCCESS,
              "Recv failed with: %s", ibv_wc_status_str(pair->wc[i].status));
     }
 
-    LOG_DEBUG("Reading from manager %d finished", conn->fd);
+    LOG_DEBUG("Reading from manager %d finished", conn->slid);
     conn->cursor = 0;
     return 1;
   }
  
-  LOG_DEBUG("Reading data through IB Recv from manager at fd %d to %p",
-            conn->fd, buf->data + conn->cursor);
+  LOG_DEBUG("Reading data through IB Recv from manager at lid %d to %p",
+            conn->slid, buf->data + conn->cursor);
   if(req_size > BUFSIZE)
     req_size = BUFSIZE;
 

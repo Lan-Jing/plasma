@@ -23,7 +23,7 @@ typedef struct {
   int64_t bufsize;
 
   // key and handle to construct a hash table
-  int sock_fd;
+  int slid;
   UT_hash_handle hh;
 } IB_pair_info;
 

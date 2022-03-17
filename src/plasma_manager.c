@@ -110,6 +110,10 @@ struct client_connection {
   /** File descriptor for the socket connected to the other
    *  plasma manager. */
   int fd;
+#ifdef IB
+  /* For transfering data through IB, let source lid be identifier */
+  int slid;
+#endif
   /** The objects that we are waiting for and their callback
    *  contexts, for either a fetch or a wait operation. */
   client_object_connection *active_objects;
@@ -471,14 +475,18 @@ client_connection *get_manager_connection(plasma_manager_state *state,
     /* If we don't already have a connection to this manager, start one. */
     int fd = plasma_manager_connect(ip_addr, port);
     CHECK(fd >= 0);
-  #ifdef IB
+    
+    manager_conn = malloc(sizeof(client_connection));
+    CHECKM(manager_conn != NULL, "Failed to allocate manager connection");
+
+  #ifdef IB 
+    /* This will search for an existing IB connection then create a new one */
     char message = 'M';
     write_bytes(fd, (uint8_t*)&message, 1);
-    setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
+    manager_conn->slid = setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
   #endif
     /* TODO(swang): Handle the case when connection to this manager was
      * unsuccessful. */
-    manager_conn = malloc(sizeof(client_connection));
     manager_conn->fd = fd;
     manager_conn->manager_state = state;
     manager_conn->transfer_queue = NULL;
@@ -779,9 +787,10 @@ client_connection *new_client_connection(event_loop *loop,
   read_bytes(conn->fd, (uint8_t*)&conn_type, 1);
   if(conn_type == 'C') {
     LOG_DEBUG("Manager at %d connected to a client process.", conn->fd);
+    conn->slid = 0;
   } else {
     LOG_DEBUG("Manager at %d connected to another manager process.", conn->fd);
-    setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER);
+    conn->slid = setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER);
   }
 #endif
 
