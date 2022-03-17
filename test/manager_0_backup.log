@@ -1,0 +1,29 @@
+[ERROR] (io.c:141: errno: No such file or directory) Connection to socket failed for pathname 10000.
+[DEBUG] (src/plasma_manager.c:261) Connected to db at 89.72.35.45:6379, assigned client ID 2
+[DEBUG] (src/plasma_manager.c:271) Successful IB setup on 89.72.35.45:12345
+[DEBUG] (src/plasma_manager.c:831) Started server connected to store 10000, listening on port 12345
+[DEBUG] (src/plasma_manager.c:791) New plasma manager connection with fd 12
+[DEBUG] (src/plasma_manager.c:797) Manager at 12 connected to a client process.
+[DEBUG] (src/plasma_manager.c:757) Publishing to object table from DB client 2.
+[DEBUG] (src/plasma_manager.c:757) Publishing to object table from DB client 2.
+[DEBUG] (src/plasma_manager.c:791) New plasma manager connection with fd 13
+[DEBUG] (src/plasma_manager.c:800) Manager at 13 connected to another manager process.
+[DEBUG] (src/ib.c:263) IB port 244 connects to <171:240879>
+[DEBUG] (src/plasma_manager.c:480) Getting manager connection to 89.72.35.50:12345 on DB client 2
+[DEBUG] (src/ib.c:234) IB connection to lid 171 already exists
+[DEBUG] (src/plasma_manager.c:368) Transferring object to manager
+[DEBUG] (src/ib.c:356) cursor at 0, data sent: hello world
+[DEBUG] (src/ib.c:357) Writing data through IB Send to manager at lid 171
+[DEBUG] (src/ib.c:370) Sender polling CQ, got 0 CQEs
+[DEBUG] (src/plasma_manager.c:368) Transferring object to manager
+[DEBUG] (src/ib.c:350) Writing to manager 171 finished
+[DEBUG] (src/plasma_manager.c:480) Getting manager connection to 89.72.35.50:12345 on DB client 2
+[DEBUG] (src/plasma_manager.c:368) Transferring object to manager
+[DEBUG] (src/ib.c:356) cursor at 0, data sent: hello world
+[DEBUG] (src/ib.c:357) Writing data through IB Send to manager at lid 171
+[DEBUG] (src/ib.c:370) Sender polling CQ, got 1 CQEs
+[DEBUG] (src/ib.c:373) Work request 35072448 status: success
+[DEBUG] (src/plasma_manager.c:368) Transferring object to manager
+[DEBUG] (src/ib.c:350) Writing to manager 171 finished
+[INFO] (src/plasma_manager.c:762) Disconnecting client on fd 13
+[INFO] (src/plasma_manager.c:762) Disconnecting client on fd 12

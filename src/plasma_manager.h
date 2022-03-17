@@ -6,14 +6,14 @@
 #include "event_loop.h"
 
 #ifndef RAY_NUM_RETRIES
-#define NUM_RETRIES 5
+#define NUM_RETRIES 0
 #else
 #define NUM_RETRIES RAY_NUM_RETRIES
 #endif
 
 /* Timeouts are in milliseconds. */
 #ifndef RAY_TIMEOUT
-#define MANAGER_TIMEOUT 1000
+#define MANAGER_TIMEOUT 100000
 #else
 #define MANAGER_TIMEOUT RAY_TIMEOUT
 #endif

@@ -128,6 +128,14 @@ struct client_connection {
   UT_hash_handle manager_hh;
 };
 
+void print_current_time()
+{
+  time_t t = time(NULL);
+  struct tm tm = *localtime(&t);
+  printf("now: %d-%02d-%02d %02d:%02d:%02d\n", 
+         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+}
+
 void free_client_object_connection(client_object_connection *object_conn) {
   for (int i = 0; i < object_conn->manager_count; ++i) {
     free(object_conn->manager_vector[i]);
@@ -364,6 +372,7 @@ void send_queued_request(event_loop *loop,
        * The other manager should create an object upon receiving this request */
       manager_req.data_size = buf->data_size;
       manager_req.metadata_size = buf->metadata_size;
+      LOG_DEBUG("Initiate a new data request");
       plasma_send_request(conn->fd, PLASMA_DATA, &manager_req);
     }
   #ifdef IB

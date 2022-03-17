@@ -1,0 +1,28 @@
+[DEBUG] (src/plasma_manager.c:261) Connected to db at 89.72.35.45:6379, assigned client ID 1
+[DEBUG] (src/plasma_manager.c:271) Successful IB setup on 89.72.35.50:12345
+[DEBUG] (src/plasma_manager.c:831) Started server connected to store 10001, listening on port 12345
+[DEBUG] (src/plasma_manager.c:791) New plasma manager connection with fd 11
+[DEBUG] (src/plasma_manager.c:797) Manager at 11 connected to a client process.
+[DEBUG] (src/plasma_manager.c:751) Processing fetch
+[DEBUG] (src/plasma_manager.c:193) Registering fd 11 for fetch.
+[DEBUG] (src/plasma_manager.c:652) Object is on 1 managers
+[DEBUG] (src/plasma_manager.c:480) Getting manager connection to 89.72.35.45:12345 on DB client 1
+[DEBUG] (src/ib.c:263) IB port 171 connects to <244:58484>
+[DEBUG] (src/plasma_manager.c:360) Requesting transfer on DB client 1
+[DEBUG] (src/plasma_manager.c:791) New plasma manager connection with fd 13
+[DEBUG] (src/plasma_manager.c:800) Manager at 13 connected to another manager process.
+[DEBUG] (src/ib.c:234) IB connection to lid 244 already exists
+[DEBUG] (src/plasma_manager.c:744) Starting to stream data
+[DEBUG] (src/plasma_client.c:168) called plasma_create on conn 4 with size 4096 and metadata size 0
+[DEBUG] (src/plasma_manager.c:629) Timer went off, 5 tries left
+[DEBUG] (src/plasma_manager.c:480) Getting manager connection to 89.72.35.45:12345 on DB client 1
+[DEBUG] (src/plasma_manager.c:360) Requesting transfer on DB client 1
+[DEBUG] (src/ib.c:399) Receiver polling CQ, got 1 CQEs
+[DEBUG] (src/ib.c:402) Work request 21408896 status: success
+[DEBUG] (src/ib.c:408) Reading data through IB Recv from manager at lid 244 to 0x2b09d741c020
+[DEBUG] (src/ib.c:415) data received: hello world
+[DEBUG] (src/ib.c:389) Reading from manager 244 finished
+[DEBUG] (src/plasma_manager.c:442) reading on channel 13 finished
+[DEBUG] (src/plasma_manager.c:744) Starting to stream data
+[DEBUG] (src/plasma_client.c:168) called plasma_create on conn 4 with size 4096 and metadata size 0
+[ERROR] (src/plasma_client.c:179: errno: Cannot allocate memory) Check failure: object->data_size == data_size
