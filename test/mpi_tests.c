@@ -12,8 +12,8 @@
 #include "../src/plasma_client.h"
 
 int size, rank;
-int object_size = 4096, 
-	fetch_num = 1;
+int object_size = 4096,
+	fetch_num = 100;
 object_id *ids;
 
 char *tmp_str = "hello world";

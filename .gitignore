@@ -5,3 +5,4 @@ build/*
 .vscode/*
 src/*.o
 test/*.rdb
+test/*.log

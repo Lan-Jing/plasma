@@ -346,35 +346,35 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
-  if(req_size == 0) {
-    LOG_DEBUG("Writing to manager %d finished", conn->slid);
-    conn->cursor = 0;
-    plasma_release(conn->manager_state->plasma_conn, buf->object_id);
-    return ;
+  req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
+  while(req_size) {
+    LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
+    LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
+    memcpy(pair->ib_buf, buf->data + conn->cursor, req_size);
+    int res = post_send(pair->ib_buf, req_size, pair->mr->lkey, 
+                        (uint64_t)pair->ib_buf, pair->qp);
+    CHECKM(res == 0, "Failure detected at ibv_post_send");
+    conn->cursor += req_size;
+
+    /* Check completion status after pushing a send */
+    int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq, 
+                              CQE_NUM, pair->wc);
+    LOG_DEBUG("Sender polling CQ, got %d CQEs", num_cqe);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s", 
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS, 
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+
+    req_size = buf->data_size + buf->metadata_size - conn->cursor;
+    req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   }
 
-  LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
-  LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
-  if(req_size > BUFSIZE)
-    req_size = BUFSIZE;
-  
-  memcpy(pair->ib_buf, buf->data + conn->cursor, req_size);
-  int res = post_send(pair->ib_buf, req_size, pair->mr->lkey, 
-                      (uint64_t)pair->ib_buf, pair->qp);
-  CHECKM(res == 0, "Failure detected at ibv_post_send");
-  conn->cursor += req_size;
-
-  /* Check completion status after pushing a send */
-  int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq, 
-                            CQE_NUM, pair->wc);
-  LOG_DEBUG("Sender polling CQ, got %d CQEs", num_cqe);
-  CHECKM(num_cqe >= 0, "Failed to poll CQ");
-  for(int i = 0;i < num_cqe;i++) {
-    LOG_DEBUG("Work request %" PRIu64 " status: %s", 
-              pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
-    CHECKM(pair->wc[i].status == IBV_WC_SUCCESS, 
-           "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
-  }
+  LOG_DEBUG("Writing to manager %d finished", conn->slid);
+  conn->cursor = 0;
+  plasma_release(conn->manager_state->plasma_conn, buf->object_id);
 }
 
 int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
@@ -385,39 +385,39 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
-  if(req_size == 0) {
-    LOG_DEBUG("Reading from manager %d finished", conn->slid);
-    conn->cursor = 0;
-    return 1; // done
+  req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
+  while(req_size) {
+    /* On receiver side however, we first check the result of previous recv requests,
+       to make sure we can poll the data buffer.
+       Then generate a new recv request. */
+    int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
+                              CQE_NUM, pair->wc);
+    LOG_DEBUG("Receiver polling CQ, got %d CQEs", num_cqe);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s", 
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
+             "Recv failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+
+    LOG_DEBUG("Reading data through IB Recv from manager at lid %d to %p",
+              conn->slid, buf->data + conn->cursor);
+    memcpy(buf->data + conn->cursor, pair->ib_buf, req_size);
+    conn->cursor += req_size;
+    LOG_DEBUG("data received: %s", buf->data);
+
+    int res = post_recv(pair->ib_buf, pair->bufsize, pair->mr->lkey,
+                        (uint64_t)pair->ib_buf, pair->qp);
+    CHECKM(res == 0, "Failure detected at ibv_post_recv");
+
+    req_size = buf->data_size + buf->metadata_size - conn->cursor;
+    req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   }
- 
-  /* On receiver side however, we first check the result of previous recv requests,
-     to make sure we can poll the data buffer.
-     Then generate a new recv request. */
-  int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
-                            CQE_NUM, pair->wc);
-  LOG_DEBUG("Receiver polling CQ, got %d CQEs", num_cqe);
-  CHECKM(num_cqe >= 0, "Failed to poll CQ");
-  for(int i = 0;i < num_cqe;i++) {
-    LOG_DEBUG("Work request %" PRIu64 " status: %s", 
-              pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
-    CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
-           "Recv failed with: %s", ibv_wc_status_str(pair->wc[i].status));
-  }
 
-  LOG_DEBUG("Reading data through IB Recv from manager at lid %d to %p",
-            conn->slid, buf->data + conn->cursor);
-  if(req_size > BUFSIZE)
-    req_size = BUFSIZE;
-
-  memcpy(buf->data + conn->cursor, pair->ib_buf, req_size);
-  conn->cursor += req_size;
-  LOG_DEBUG("data received: %s", buf->data);
-
-  int res = post_recv(pair->ib_buf, pair->bufsize, pair->mr->lkey,
-                      (uint64_t)pair->ib_buf, pair->qp);
-  CHECKM(res == 0, "Failure detected at ibv_post_recv");
-  return 0;
+  LOG_DEBUG("Reading from manager %d finished", conn->slid);
+  conn->cursor = 0;
+  return 1;
 }
 
 #endif // IB

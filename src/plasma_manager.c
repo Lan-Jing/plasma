@@ -430,6 +430,7 @@ void process_data_chunk(event_loop *loop,
   client_connection *conn = (client_connection *) context;
   plasma_request_buffer *buf = conn->transfer_queue;
 #ifdef IB
+  /* Rewrite ib functions so that data streaming only takes one function call */
   int done = ib_recv_object_chunk(conn, buf);
 #else
   int done = read_object_chunk(conn, buf);
@@ -440,7 +441,11 @@ void process_data_chunk(event_loop *loop,
 
   /* Seal the object and release it. The release corresponds to the call to
    * plasma_create that occurred in process_data_request. */
+#ifdef IB
+  LOG_DEBUG("reading on IB channel finished");
+#else
   LOG_DEBUG("reading on channel %d finished", data_sock);
+#endif
   plasma_seal(conn->manager_state->plasma_conn, buf->object_id);
   plasma_release(conn->manager_state->plasma_conn, buf->object_id);
   /* Notify any clients who were waiting on a fetch to this object. */
@@ -461,10 +466,12 @@ void process_data_chunk(event_loop *loop,
   /* Remove the request buffer used for reading this object's data. */
   LL_DELETE(conn->transfer_queue, buf);
   free(buf);
+#ifndef IB
   /* Switch to listening for requests from this socket, instead of reading
    * object data. */
   event_loop_remove_file(loop, data_sock);
   event_loop_add_file(loop, data_sock, EVENT_LOOP_READ, process_message, conn);
+#endif
 }
 
 client_connection *get_manager_connection(plasma_manager_state *state,
@@ -571,11 +578,16 @@ void process_data_request(event_loop *loop,
   LL_APPEND(conn->transfer_queue, buf);
   CHECK(conn->cursor == 0);
 
+#ifdef IB
+  /* No need to switch the socket since IB data doesn't invoke these callbacks */
+  process_data_chunk(NULL, 0, (void*)conn, 0);
+#else
   /* Switch to reading the data from this socket, instead of listening for
    * other requests. */
   event_loop_remove_file(loop, client_sock);
   event_loop_add_file(loop, client_sock, EVENT_LOOP_READ, process_data_chunk,
                       conn);
+#endif
 }
 
 /**
