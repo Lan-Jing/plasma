@@ -4,11 +4,13 @@ ROOT_DIR=$(realpath `pwd`/..)
 
 # So that we can see libplasma_client.so
 export LD_LIBRARY_PATH=$ROOT_DIR/build:$LD_LIBRARY_PATH
+export PATH=/usr/sbin:$PATH
 
 # Avoid conflict on a shared file system.
 RANK=$OMPI_COMM_WORLD_RANK
 STORE_IPC_PORT=1000$RANK
-MANAGER_PORT=15001
+MANAGER_PORT=12345
+
 HOSTNAME=`hostname`
 IP_ADDR=`hostname --ip-address`
 
@@ -21,14 +23,15 @@ fi
 MASTER_IP=`getent hosts $1 | awk '{ print $1 }'`
 
 # kill all processes listening on ports before starting redis/manager.
-kill -9 `/usr/sbin/lsof -t -i :6379`  || true
-kill -9 `/usr/sbin/lsof -t -i :$MANAGER_PORT` || true
+kill -9 `lsof -t -i :6379`  || true
+kill -9 `lsof -t -i :$MANAGER_PORT` || true
 
 if [[ $HOSTNAME == $1 ]]; then
 	printf "Master Process on %s\n" "$HOSTNAME"
 	
 	# Remove all Unix Domain Socket
 	rm 1000* || true
+	rm *data || true
 	$ROOT_DIR/common/thirdparty/redis-3.2.3/src/redis-server --protected-mode no &
 else
 	printf "Slave Process on  %s\n" "$HOSTNAME"

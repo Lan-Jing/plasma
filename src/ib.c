@@ -8,6 +8,7 @@
 #include "plasma_client.h"
 #include "io.h"
 #include "ib.h"
+#include "timer.h"
 #include "state/db.h"
 #include "state/object_table.h"
 
@@ -345,6 +346,11 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
+  struct timespec send, poll, start, end;
+  memset(&send, 0, sizeof(struct timespec));
+  memset(&poll, 0, sizeof(struct timespec));
+  clock_gettime(CLOCK_REALTIME, &start);
+
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   while(req_size) {
@@ -356,21 +362,29 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     CHECKM(res == 0, "Failure detected at ibv_post_send");
     conn->cursor += req_size;
 
-    /* Check completion status after pushing a send */
-    int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq, 
-                              CQE_NUM, pair->wc);
-    LOG_DEBUG("Sender polling CQ, got %d CQEs", num_cqe);
-    CHECKM(num_cqe >= 0, "Failed to poll CQ");
-    for(int i = 0;i < num_cqe;i++) {
-      LOG_DEBUG("Work request %" PRIu64 " status: %s", 
-                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
-      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS, 
-             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
-    }
-
     req_size = buf->data_size + buf->metadata_size - conn->cursor;
     req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   }
+
+  clock_gettime(CLOCK_REALTIME, &end);
+  time_add(&send, time_diff(start, end));
+  clock_gettime(CLOCK_REALTIME, &start);
+
+  /* Check completion status after pushing a send */
+  int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq, 
+                            CQE_NUM, pair->wc);
+  LOG_DEBUG("Sender polling CQ, got %d CQEs", num_cqe);
+  CHECKM(num_cqe >= 0, "Failed to poll CQ");
+  for(int i = 0;i < num_cqe;i++) {
+    LOG_DEBUG("Work request %" PRIu64 " status: %s", 
+              pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+    CHECKM(pair->wc[i].status == IBV_WC_SUCCESS, 
+           "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+  }
+
+  clock_gettime(CLOCK_REALTIME, &end);
+  time_add(&poll, time_diff(start, end));
+  LOG_DEBUG("send:%lu poll:%lu(ns)", time_avg(send, 1), time_avg(poll, 1));
 
   LOG_DEBUG("Writing to manager %d finished", conn->slid);
   conn->cursor = 0;
@@ -384,22 +398,36 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
+  struct timespec recv, poll, done, s1, e1, s2, e2;
+  memset(&recv, 0, sizeof(struct timespec));
+  memset(&poll, 0, sizeof(struct timespec));
+  memset(&done, 0, sizeof(struct timespec));
+  clock_gettime(CLOCK_REALTIME, &s1);
+
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   while(req_size) {
     /* On receiver side however, we first check the result of previous recv requests,
        to make sure we can poll the data buffer.
        Then generate a new recv request. */
+    clock_gettime(CLOCK_REALTIME, &s2);
     int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
                               CQE_NUM, pair->wc);
-    LOG_DEBUG("Receiver polling CQ, got %d CQEs", num_cqe);
+    clock_gettime(CLOCK_REALTIME, &e2);
+    time_add(&poll, time_diff(s2, e2));
+
     CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    if(!num_cqe) 
+      continue;
+    LOG_DEBUG("Receiver polling CQ, got %d CQEs", num_cqe);
     for(int i = 0;i < num_cqe;i++) {
       LOG_DEBUG("Work request %" PRIu64 " status: %s", 
                 pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
       CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
              "Recv failed with: %s", ibv_wc_status_str(pair->wc[i].status));
     }
+    
+    clock_gettime(CLOCK_REALTIME, &s2);
 
     LOG_DEBUG("Reading data through IB Recv from manager at lid %d to %p",
               conn->slid, buf->data + conn->cursor);
@@ -413,7 +441,15 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
 
     req_size = buf->data_size + buf->metadata_size - conn->cursor;
     req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
+
+    clock_gettime(CLOCK_REALTIME, &e2);
+    time_add(&recv, time_diff(s2, e2));
   }
+
+  clock_gettime(CLOCK_REALTIME, &e1);
+  time_add(&done, time_diff(s1, e1));
+  LOG_DEBUG("recv:%lu poll:%lu done:%lu(ns)", 
+            time_avg(recv, 1), time_avg(poll, 1), time_avg(done, 1));
 
   LOG_DEBUG("Reading from manager %d finished", conn->slid);
   conn->cursor = 0;

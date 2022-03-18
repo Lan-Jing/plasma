@@ -10,6 +10,7 @@
 
 #include "../src/plasma.h"
 #include "../src/plasma_client.h"
+#include "../src/timer.h"
 
 int size, rank;
 int object_size = 4096,
@@ -17,11 +18,6 @@ int object_size = 4096,
 object_id *ids;
 
 char *tmp_str = "hello world";
-
-// Count wall time interval of two points.
-struct timespec time_diff(struct timespec start, struct timespec end);
-void time_add(struct timespec *des, struct timespec source);
-uint64_t time_avg(struct timespec t, int num);
 
 void generate_ids(int num_objects)
 {
@@ -89,9 +85,9 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 	}
 
 	// Report latency for local store operations
-	printf("Average latency for plasma_create: %" PRIu64 "ns\n", time_avg(timers[0], fetch_num));
-	printf("Average latency for plasma_get   : %" PRIu64 "ns\n", time_avg(timers[1], fetch_num));
-	printf("Average latency for plasma_delete: %" PRIu64 "ns\n", time_avg(timers[2], fetch_num));
+	printf("Average latency for plasma_create: %lu ns\n", time_avg(timers[0], fetch_num));
+	printf("Average latency for plasma_get   : %lu ns\n", time_avg(timers[1], fetch_num));
+	printf("Average latency for plasma_delete: %lu ns\n", time_avg(timers[2], fetch_num));
 	return 0;
 }
 
@@ -114,7 +110,7 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 		assert(is_fetched[i] != 0);
 
 	// Report latency for batched fetch requests
-	printf("Average latency for %d batched fetch requests: %" PRIu64 "ns\n", fetch_num, time_avg(timer, fetch_num));
+	printf("Average latency for %d batched fetch requests: %lu ns\n", fetch_num, time_avg(timer, fetch_num));
 
 	free(is_fetched);
 	return 0;
@@ -194,35 +190,4 @@ int main(int argc, char *argv[])
 	destroy_ids();
 	MPI_Finalize();
 	return 0;
-}
-
-struct timespec time_diff(struct timespec start, struct timespec end)
-{
-	struct timespec res;
-	if(end.tv_nsec-start.tv_nsec < 0) {
-		res.tv_nsec = end.tv_nsec-start.tv_nsec+1e9;
-		res.tv_sec  = end.tv_sec-start.tv_sec-1;
-	} else {
-		res.tv_nsec = end.tv_nsec-start.tv_nsec;
-		res.tv_sec  = end.tv_sec-start.tv_sec;
-	}
-	return res;
-}
-
-void time_add(struct timespec *des, struct timespec source)
-{
-	if(des->tv_nsec+source.tv_nsec >= 1e9) {
-		des->tv_nsec += source.tv_nsec-1e9;
-		des->tv_sec  += source.tv_sec+1;
-	} else {
-		des->tv_nsec += source.tv_nsec;
-		des->tv_sec  += source.tv_sec;
-	}
-}
-
-uint64_t time_avg(struct timespec t, int num)
-{
-	uint64_t res = (uint64_t)t.tv_nsec + (uint64_t)t.tv_sec * 1e9;
-
-	return res/(uint64_t)num;
 }

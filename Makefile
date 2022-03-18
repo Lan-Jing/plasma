@@ -22,14 +22,14 @@ clean:
 $(BUILD)/manager_tests: test/manager_tests.c src/plasma.h src/plasma_client.h src/plasma_client.c src/plasma_manager.h src/plasma_manager.c src/fling.h src/fling.c common
 	$(CC) $(CFLAGS) $(TEST_CFLAGS) -o $@ test/manager_tests.c src/plasma_manager.c src/plasma_client.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a
 
-$(BUILD)/mpi_tests: test/mpi_tests.c $(BUILD)/libplasma_client.so common/common.c
-	$(CC) $(CFLAGS) -o $@ test/mpi_tests.c common/common.c -L$(BUILD) -lplasma_client 
+$(BUILD)/mpi_tests: test/mpi_tests.c src/timer.c $(BUILD)/libplasma_client.so common/common.c
+	$(CC) $(CFLAGS) -o $@ test/mpi_tests.c src/timer.c common/common.c -L$(BUILD) -lplasma_client 
 
 $(BUILD)/plasma_store: src/plasma_store.c src/plasma.h src/fling.h src/fling.c src/malloc.c src/malloc.h thirdparty/dlmalloc.c common
 	$(CC) $(CFLAGS) src/plasma_store.c src/fling.c src/malloc.c common/build/libcommon.a -o $(BUILD)/plasma_store
 
-$(BUILD)/plasma_manager: src/plasma_manager.c src/ib.c src/ib.h src/plasma.h src/plasma_client.c src/fling.h src/fling.c common
-	$(CC) $(CFLAGS) src/plasma_manager.c src/plasma_client.c src/ib.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
+$(BUILD)/plasma_manager: src/plasma_manager.c src/ib.c src/timer.c src/plasma.h src/plasma_client.c src/fling.h src/fling.c common
+	$(CC) $(CFLAGS) src/plasma_manager.c src/plasma_client.c src/ib.c src/timer.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
 
 $(BUILD)/libplasma_client.so: src/plasma_client.c src/fling.h src/fling.c common
 	$(CC) $(CFLAGS) src/plasma_client.c src/fling.c common/build/libcommon.a -fPIC -shared -o $@
