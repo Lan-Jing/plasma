@@ -22,9 +22,9 @@ fi
 # Resolve IP of the master node.
 MASTER_IP=`getent hosts $1 | awk '{ print $1 }'`
 
-# kill all processes listening on ports before starting redis/manager.
+# kill all processes listening on ports before starting redis/manager/store.
 kill -9 `lsof -t -i :6379`  || true
-kill -9 `lsof -t -i :$MANAGER_PORT` || true
+pkill plasma || true
 
 if [[ $HOSTNAME == $1 ]]; then
 	printf "Master Process on %s\n" "$HOSTNAME"

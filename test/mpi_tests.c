@@ -13,7 +13,7 @@
 #include "../src/timer.h"
 
 int size, rank;
-int object_size = 4096,
+int object_size = 40960,
 	fetch_num = 100;
 object_id *ids;
 
@@ -110,7 +110,9 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 		assert(is_fetched[i] != 0);
 
 	// Report latency for batched fetch requests
-	printf("Average latency for %d batched fetch requests: %lu ns\n", fetch_num, time_avg(timer, fetch_num));
+	// printf("Average latency for %d batched fetch requests: %lu ns\n", fetch_num, time_avg(timer, fetch_num));
+	printf("Duration: %lf(s)\nThroughput: %lf(Mops)\n", 
+		   time_avg(timer, 1)/1e9, (double)fetch_num*1e3/time_avg(timer, 1));
 
 	free(is_fetched);
 	return 0;

@@ -364,7 +364,7 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   while(req_size) {
-    LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
+    // LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
     LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
     memcpy(pair->ib_send_buf, buf->data + conn->cursor, req_size);
     int res = post_send(pair->ib_send_buf, req_size, pair->send_mr->lkey,
@@ -389,8 +389,6 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
 
         if(pair->wc[i].opcode == IBV_WC_SEND)
           num_sent++;
-        if(pair->wc[i].opcode == IBV_WC_RECV)
-          goto next_round;
       }
     }
 
@@ -416,11 +414,14 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
         CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
                "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
       
-        if(pair->wc[i].opcode == IBV_WC_RECV)
-          goto next_round;
+        if(pair->wc[i].opcode == IBV_WC_RECV) {
+          // re-generate a recv request
+          int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
+                              pair->wc[i].wr_id, pair->qp);
+          CHECKM(res == 0, "Failure at ibv_post_recv");
+        }
       }
     }
-  next_round:
     LOG_DEBUG("Sync successful");
     num_sent = 0;
   }
@@ -455,7 +456,7 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     
       // mind that ib send ensures in-order delivery
       memcpy(buf->data + conn->cursor, (uint8_t*)pair->wc[i].wr_id, req_size);
-      LOG_DEBUG("data received: %s", buf->data);
+      // LOG_DEBUG("data received: %s", buf->data);
 
       num_recv++;
       int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
@@ -466,7 +467,7 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
       req_size = buf->data_size + buf->metadata_size - conn->cursor;
       req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
     }
-
+    
     if(req_size && num_recv < CQE_NUM)
       continue;
 

@@ -28,6 +28,7 @@
 #include "common.h"
 #include "io.h"
 #include "ib.h"
+#include "timer.h"
 #include "plasma.h"
 #include "plasma_client.h"
 #include "plasma_manager.h"
@@ -376,7 +377,15 @@ void send_queued_request(event_loop *loop,
       plasma_send_request(conn->fd, PLASMA_DATA, &manager_req);
     }
   #ifdef IB
+    struct timespec start, end, done_time; 
+    memset(&done_time, 0, sizeof(struct timespec));
+    clock_gettime(CLOCK_REALTIME, &start);
+
     ib_send_object_chunk(conn, buf);
+    
+    clock_gettime(CLOCK_REALTIME, &end);
+    time_add(&done_time, time_diff(start, end));
+    LOG_DEBUG("Send done in: %luns", time_avg(done_time, 1));
   #else
     write_object_chunk(conn, buf);
   #endif
@@ -431,7 +440,15 @@ void process_data_chunk(event_loop *loop,
   plasma_request_buffer *buf = conn->transfer_queue;
 #ifdef IB
   /* Rewrite ib functions so that data streaming only takes one function call */
+  struct timespec start, end, done_time; 
+  memset(&done_time, 0, sizeof(struct timespec));
+  clock_gettime(CLOCK_REALTIME, &start);
+
   int done = ib_recv_object_chunk(conn, buf);
+  
+  clock_gettime(CLOCK_REALTIME, &end);
+  time_add(&done_time, time_diff(start, end));
+  LOG_DEBUG("recv done in: %luns", time_avg(done_time, 1));
 #else
   int done = read_object_chunk(conn, buf);
 #endif
@@ -727,10 +744,18 @@ void process_fetch_request(client_connection *client_conn,
 void process_fetch_requests(client_connection *client_conn,
                             int num_object_ids,
                             object_id object_ids[]) {
+  struct timespec start, end, done_time; 
+  memset(&done_time, 0, sizeof(struct timespec));
+  clock_gettime(CLOCK_REALTIME, &start);
+                    
   for (int i = 0; i < num_object_ids; ++i) {
     ++client_conn->num_return_objects;
     process_fetch_request(client_conn, object_ids[i]);
   }
+
+  clock_gettime(CLOCK_REALTIME, &end);
+  time_add(&done_time, time_diff(start, end));
+  LOG_DEBUG("Fetch all done in: %luns", time_avg(done_time, 1));
 }
 
 void process_message(event_loop *loop,

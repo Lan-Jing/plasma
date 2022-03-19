@@ -31,14 +31,14 @@ $(BUILD)/plasma_store: src/plasma_store.c src/plasma.h src/fling.h src/fling.c s
 $(BUILD)/plasma_manager: src/plasma_manager.c src/ib.c src/timer.c src/plasma.h src/plasma_client.c src/fling.h src/fling.c common
 	$(CC) $(CFLAGS) src/plasma_manager.c src/plasma_client.c src/ib.c src/timer.c src/fling.c common/build/libcommon.a common/thirdparty/hiredis/libhiredis.a -o $(BUILD)/plasma_manager
 
-$(BUILD)/libplasma_client.so: src/plasma_client.c src/fling.h src/fling.c common
-	$(CC) $(CFLAGS) src/plasma_client.c src/fling.c common/build/libcommon.a -fPIC -shared -o $@
+$(BUILD)/libplasma_client.so: src/plasma_client.c src/timer.c src/fling.h src/fling.c common
+	$(CC) $(CFLAGS) src/plasma_client.c src/timer.c src/fling.c common/build/libcommon.a -fPIC -shared -o $@
 
 $(BUILD)/libplasma_client.a: src/plasma_client.o src/fling.o
 	ar rcs $@ $^
 
-$(BUILD)/example: src/plasma_client.c src/plasma.h src/example.c src/fling.h src/fling.c common
-	$(CC) $(CFLAGS) src/plasma_client.c src/example.c src/fling.c common/build/libcommon.a -o $(BUILD)/example
+$(BUILD)/example: src/plasma_client.c src/plasma.h src/timer.c src/example.c src/fling.h src/fling.c common
+	$(CC) $(CFLAGS) src/plasma_client.c src/example.c src/timer.c src/fling.c common/build/libcommon.a -o $(BUILD)/example
 
 common: FORCE
 	git submodule update --init --recursive
