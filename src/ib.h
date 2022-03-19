@@ -17,9 +17,11 @@
    Should contain extra info for indexing */
 typedef struct {
   struct ibv_qp *qp;
-  struct ibv_mr *mr;
   struct ibv_wc *wc;
-  uint8_t *ib_buf;
+  struct ibv_mr *recv_mr;
+  struct ibv_mr *send_mr;
+  uint8_t *ib_recv_buf;
+  uint8_t *ib_send_buf;
   int64_t bufsize;
 
   // key and handle to construct a hash table
