@@ -13,7 +13,7 @@
 #include "../src/timer.h"
 
 int size, rank;
-int object_size = 4096 * 16,
+int object_size = 4096,
 	fetch_num = 1000,
 	warmup_num = 5; // Don't count the first few transfer.
 object_id *ids;
@@ -86,9 +86,9 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 	}
 
 	// Report latency for local store operations
-	printf("Average latency for plasma_create: %lu ns\n", time_avg(timers[0], fetch_num));
-	printf("Average latency for plasma_get   : %lu ns\n", time_avg(timers[1], fetch_num));
-	printf("Average latency for plasma_delete: %lu ns\n", time_avg(timers[2], fetch_num));
+	printf("Average latency for plasma_create: %6lu ns\n", time_avg(timers[0], fetch_num));
+	printf("Average latency for plasma_get   : %6lu ns\n", time_avg(timers[1], fetch_num));
+	printf("Average latency for plasma_delete: %6lu ns\n", time_avg(timers[2], fetch_num));
 	return 0;
 }
 
@@ -122,8 +122,9 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 	}
 
 	// Report latency for batched fetch requests
-	// printf("Average latency for %d batched fetch requests: %lu ns\n", fetch_num, time_avg(timer, fetch_num));
-	printf("Duration: %lf(s)\nThroughput: %lf(Mops)\n", 
+	printf("Average latency for %d batched fetch requests of object size %ld: %6lu ns\n", 
+		   fetch_num, object_size, time_avg(timer, fetch_num));
+	printf("Test done in: %lf(s)\nThroughput: %lf(Mops)\n", 
 		   time_avg(timer, 1)/1e9, (double)fetch_num*1e3/time_avg(timer, 1));
 
 	free(is_fetched);

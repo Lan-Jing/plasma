@@ -4,7 +4,7 @@ spack load openmpi
 
 MODE=""
 if [[ $# < 1 || $1 == "tcp" ]]; then
-	MODE="debug"
+	MODE="all"
 else
 	MODE="ib"
 fi

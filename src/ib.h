@@ -49,19 +49,51 @@ typedef struct {
 }__attribute__((packed)) QP_info;
 
 /* This function moves qp from state reset to rts */
-int bringup_qp(struct ibv_qp *qp, QP_info qp_info);
+/**
+ * @brief This function moves qp from state RESET to RTR then RTS
+ * 
+ * @param qp The quere pair we want to bring up
+ * @param remote_qp_info Necessary infomation of the remote endpoint
+ * @return int 
+ */
+int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info);
 
-/* Bring up IB connections of a pair of managers */
+/**
+ * @brief Send/Recv parameters of the local queue pair 
+ * 
+ * @param fd Socket fd that connects to the remote endpoint
+ * @param local_qp_info Parameter of local qp
+ * @return int 
+ */
 int sock_send_qp_info(int fd, QP_info  *local_qp_info);
 int sock_recv_qp_info(int fd, QP_info *remote_qp_info);
+
+/**
+ * @brief Set up IB connection and do all necessary things for further message transfer
+ * 
+ * @param ib_state IB Context of a manager process
+ * @param fd Socket fd that connects to the remote endpoint
+ * @param mstate Whether this manager process connects as server(or client)
+ * @return int 
+ */
 int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate);
 void free_ib_conn(IB_state *ib_state, int fd);
 
-/* Prepare IB connections for one process, e.g. device query */
+/**
+ * @brief Prepare IB connections for one process, e.g. device query
+ * 
+ * @param ib_state IB Context of a manager process 
+ * @return int 
+ */
 int setup_ib(IB_state *ib_state);
 void free_ib(IB_state *ib_state);
 
-/* IB Send/Recv for a chunk of transfered buffer */
+/**
+ * @brief IB Send/Recv for a transferred buffer
+ * 
+ * @param conn Client connection context to the other manager
+ * @param buf a request buffer containing data need to be 
+ */
 void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf);
 int  ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf);
 
