@@ -13,8 +13,9 @@
 #include "../src/timer.h"
 
 int size, rank;
-int object_size = 40960,
-	fetch_num = 100;
+int object_size = 4096 * 16,
+	fetch_num = 1000,
+	warmup_num = 5; // Don't count the first few transfer.
 object_id *ids;
 
 char *tmp_str = "hello world";
@@ -101,13 +102,24 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 	int *is_fetched = (int*)malloc(fetch_num * sizeof(int));
 	memset(is_fetched, 0, fetch_num * sizeof(int));
 
+	/* A warmup to hide performance degradation from connection setup */
+	plasma_fetch(conn, warmup_num, ids, is_fetched);
+	printf("Network benchmark starts\n");
+
 	clock_gettime(CLOCK_REALTIME, &start);
-	plasma_fetch(conn, fetch_num, ids, is_fetched);
+	plasma_fetch(conn, fetch_num-warmup_num, ids+warmup_num, is_fetched+warmup_num);
 	clock_gettime(CLOCK_REALTIME, &end);
 	time_add(&timer, time_diff(start, end));
 
-	for(int i = 0;i < fetch_num;i++)
+	for(int i = warmup_num;i < fetch_num;i++) {
 		assert(is_fetched[i] != 0);
+		if(i == warmup_num) {
+			uint8_t *data = NULL;
+			int64_t size = 0;
+			plasma_get(conn, ids[i], &size, &data, NULL, NULL);
+			LOG_DEBUG("Data fetched: %s", data);
+		}
+	}
 
 	// Report latency for batched fetch requests
 	// printf("Average latency for %d batched fetch requests: %lu ns\n", fetch_num, time_avg(timer, fetch_num));

@@ -149,6 +149,8 @@ int send_client_reply(client_connection *conn, plasma_reply *reply) {
   CHECK(conn->num_return_objects >= 0);
   --conn->num_return_objects;
   /* TODO(swang): Handle errors in write. */
+  /* Note: but send a reply is fast */
+  // int n = send(conn->fd, (uint8_t *) reply, sizeof(plasma_reply), MSG_WAITALL);
   int n = write(conn->fd, (uint8_t *) reply, sizeof(plasma_reply));
   return (n != sizeof(plasma_reply));
 }
@@ -373,7 +375,6 @@ void send_queued_request(event_loop *loop,
        * The other manager should create an object upon receiving this request */
       manager_req.data_size = buf->data_size;
       manager_req.metadata_size = buf->metadata_size;
-      LOG_DEBUG("Initiate a new data request");
       plasma_send_request(conn->fd, PLASMA_DATA, &manager_req);
     }
   #ifdef IB
@@ -385,7 +386,7 @@ void send_queued_request(event_loop *loop,
     
     clock_gettime(CLOCK_REALTIME, &end);
     time_add(&done_time, time_diff(start, end));
-    LOG_DEBUG("Send done in: %luns", time_avg(done_time, 1));
+    LOG_DEBUG("Data sent in: %luns", time_avg(done_time, 1));
   #else
     write_object_chunk(conn, buf);
   #endif
@@ -448,7 +449,7 @@ void process_data_chunk(event_loop *loop,
   
   clock_gettime(CLOCK_REALTIME, &end);
   time_add(&done_time, time_diff(start, end));
-  LOG_DEBUG("recv done in: %luns", time_avg(done_time, 1));
+  LOG_DEBUG("Data fetched in: %luns", time_avg(done_time, 1));
 #else
   int done = read_object_chunk(conn, buf);
 #endif
@@ -675,6 +676,7 @@ void request_transfer(object_id object_id,
                       int manager_count,
                       const char *manager_vector[],
                       void *context) {
+  // Note: Only the first transfer is slow
   client_connection *client_conn = (client_connection *) context;
   client_object_connection *object_conn =
       get_object_connection(client_conn, object_id);
@@ -744,18 +746,10 @@ void process_fetch_request(client_connection *client_conn,
 void process_fetch_requests(client_connection *client_conn,
                             int num_object_ids,
                             object_id object_ids[]) {
-  struct timespec start, end, done_time; 
-  memset(&done_time, 0, sizeof(struct timespec));
-  clock_gettime(CLOCK_REALTIME, &start);
-                    
   for (int i = 0; i < num_object_ids; ++i) {
     ++client_conn->num_return_objects;
     process_fetch_request(client_conn, object_ids[i]);
   }
-
-  clock_gettime(CLOCK_REALTIME, &end);
-  time_add(&done_time, time_diff(start, end));
-  LOG_DEBUG("Fetch all done in: %luns", time_avg(done_time, 1));
 }
 
 void process_message(event_loop *loop,

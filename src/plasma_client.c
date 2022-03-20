@@ -436,14 +436,11 @@ void plasma_fetch(plasma_connection *conn,
   LOG_DEBUG("Requesting fetch");
   plasma_send_request(conn->manager_conn, PLASMA_FETCH, req);
   free(req);
-
+  
   plasma_reply reply;
   int nbytes, success;
   for (int received = 0; received < num_object_ids; ++received) {
-    struct timespec start, end, done_time; 
-    memset(&done_time, 0, sizeof(struct timespec));
-    clock_gettime(CLOCK_REALTIME, &start);
-    
+    /* This call may cause performance degradation--don't know why */
     nbytes = recv(conn->manager_conn, (uint8_t *) &reply, sizeof(reply),
                   MSG_WAITALL);
     if (nbytes < 0) {
@@ -467,10 +464,6 @@ void plasma_fetch(plasma_connection *conn,
     }
     CHECKM(i != num_object_ids,
            "Received unexpected object ID from manager during fetch.");
-    
-    clock_gettime(CLOCK_REALTIME, &end);
-    time_add(&done_time, time_diff(start, end));
-    LOG_DEBUG("One fetch in: %luns", time_avg(done_time, 1));
   }
 }
 

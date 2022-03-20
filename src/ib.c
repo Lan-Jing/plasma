@@ -364,49 +364,30 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   while(req_size) {
-    // LOG_DEBUG("cursor at %ld, data sent: %s", conn->cursor, buf->data + conn->cursor);
     LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
     memcpy(pair->ib_send_buf, buf->data + conn->cursor, req_size);
     int res = post_send(pair->ib_send_buf, req_size, pair->send_mr->lkey,
                         (uint64_t)pair->ib_send_buf, pair->qp);
     CHECKM(res == 0, "Failure detectd at ibv_post_send");
 
-    // Poll CQE to make sure that data is sent
-    int num_cqe = 0;
-    while(num_cqe <= 0) {
-      num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
-                            CQE_NUM, pair->wc);
-      CHECKM(num_cqe >= 0, "Failed to poll CQ");
-      if(!num_cqe)
-        continue;
-    
-      LOG_DEBUG("Sender polling CQ, got %d CQEs", num_cqe);
-      for(int i = 0;i < num_cqe;i++) {
-        LOG_DEBUG("Work request %" PRIu64 " status: %s",
-                  pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
-        CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
-               "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
-
-        if(pair->wc[i].opcode == IBV_WC_SEND)
-          num_sent++;
-      }
-    }
-
+    num_sent++;
     conn->cursor += req_size;
     req_size = buf->data_size + buf->metadata_size - conn->cursor;
     req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
     if(req_size && num_sent < CQE_NUM)
       continue;
 
-    // The receiver may run out of recv requests now, sync by doing a receive
-    num_cqe = 0;
-    while(num_cqe <= 0) {
+    /* The receiver may have run out of recv requests now, sync by doing a receive.
+       We expect to poll N successful send and 1 ACK message */
+    int num_cqe = 0, num_poll = 0;
+    while(num_poll < num_sent + 1) { 
       num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
                             CQE_NUM, pair->wc);
       CHECKM(num_cqe >= 0, "Failed to poll CQ");
       if(!num_cqe)
         continue;
 
+      num_poll += num_cqe;
       LOG_DEBUG("Sender polling CQ, got %d CQEs", num_cqe);
       for(int i = 0;i < num_cqe;i++) {
         LOG_DEBUG("Work request %" PRIu64 " status: %s",
@@ -456,7 +437,6 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     
       // mind that ib send ensures in-order delivery
       memcpy(buf->data + conn->cursor, (uint8_t*)pair->wc[i].wr_id, req_size);
-      // LOG_DEBUG("data received: %s", buf->data);
 
       num_recv++;
       int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
