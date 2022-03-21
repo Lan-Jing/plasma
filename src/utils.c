@@ -1,5 +1,9 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
-#include "timer.h"
+
+#include "utils.h"
 
 struct timespec time_diff(struct timespec start, struct timespec end)
 {
@@ -30,4 +34,23 @@ uint64_t time_avg(struct timespec t, int num)
 	uint64_t res = (uint64_t)t.tv_nsec + (uint64_t)t.tv_sec * 1e9;
 
 	return res/(uint64_t)num;
+}
+
+void shuffle(void *array, size_t n, size_t size)
+{
+	char tmp[size];
+	char *arr = array;
+	size_t stride = size * sizeof(char);
+
+	if(n <= 1)
+		return;
+	size_t i;
+	for(i = 0;i < n-1;i++) {
+		size_t rnd = (size_t)rand();
+		size_t j = i + rnd / (RAND_MAX / (n-i) + 1);
+
+		memcpy(tmp, arr+j*stride, size);
+		memcpy(arr+j*stride, arr+i*stride, size);
+		memcpy(arr+i*stride, tmp, size);
+	}
 }

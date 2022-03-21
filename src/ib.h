@@ -18,6 +18,7 @@
 typedef struct {
   struct ibv_qp *qp;
   struct ibv_wc *wc;
+  struct ibv_cq *cq;
   struct ibv_mr *recv_mr;
   struct ibv_mr *send_mr;
   uint8_t *ib_recv_buf;
@@ -33,7 +34,6 @@ typedef struct {
 typedef struct {
   struct ibv_context *ctx;
   struct ibv_pd *pd;
-  struct ibv_cq *cq;
   struct ibv_device_attr dev_attr;
   struct ibv_port_attr port_attr;
 

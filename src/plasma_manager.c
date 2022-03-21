@@ -28,7 +28,7 @@
 #include "common.h"
 #include "io.h"
 #include "ib.h"
-#include "timer.h"
+#include "utils.h"
 #include "plasma.h"
 #include "plasma_client.h"
 #include "plasma_manager.h"

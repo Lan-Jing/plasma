@@ -43,7 +43,8 @@ fi
 
 # Binding numa works
 if [[ $1 == "tcp" ]]; then
-	NUMA_COMMAND=""
+	# NUMA_COMMAND=""
+	NUMA_COMMAND="numactl --cpunodebind=1"
 else
 	NUMA_COMMAND="numactl --cpunodebind=1"
 fi

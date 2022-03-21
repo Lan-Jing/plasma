@@ -8,7 +8,7 @@
 #include "plasma_client.h"
 #include "io.h"
 #include "ib.h"
-#include "timer.h"
+#include "utils.h"
 #include "state/db.h"
 #include "state/object_table.h"
 
@@ -202,9 +202,15 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
   CHECKM(pair != NULL, "Failed to allocate queue pair info");
 
+  /* we should let each queue pair has its own cq, since send/recv uses this 
+     mechanism to synchronize */
+  pair->cq = ibv_create_cq(ib_state->ctx, ib_state->dev_attr.max_cqe,
+                           NULL, NULL, 0);
+  CHECKM(pair->cq != NULL, "Failed to create cq.");
+
   struct ibv_qp_init_attr qp_init_attr = {
-    .send_cq = ib_state->cq,
-    .recv_cq = ib_state->cq,
+    .send_cq = pair->cq,
+    .recv_cq = pair->cq,
     .cap = {
       .max_send_wr = ib_state->dev_attr.max_qp_wr/4,
       .max_recv_wr = ib_state->dev_attr.max_qp_wr/4,
@@ -286,7 +292,9 @@ void free_ib_conn(IB_state *ib_state, int slid)
     return ;
   }
   HASH_DEL(ib_state->pairs, pair);
-
+  
+  if(pair->cq != NULL) 
+    ibv_destroy_cq(pair->cq);
   if(pair->qp != NULL)
     ibv_destroy_qp(pair->qp);
   if(pair->send_mr != NULL)
@@ -325,12 +333,6 @@ int setup_ib(IB_state *ib_state)
   res = ibv_query_port(ib_state->ctx, IB_PORT, &(ib_state->port_attr));
   CHECKM(res == 0, "Failed to query IB port info.");
 
-  /* So far we will let queue pairs share one cq, 
-     since polling cq has constant performance */
-  ib_state->cq = ibv_create_cq(ib_state->ctx, ib_state->dev_attr.max_cqe,
-                               NULL, NULL, 0);
-  CHECKM(ib_state->cq != NULL, "Failed to create cq.");
-
   ibv_free_device_list(dev_list);
   return 0;
 }
@@ -340,9 +342,6 @@ void free_ib(IB_state *ib_state)
 {
   if(ib_state == NULL)
     return ;
-
-  if(ib_state->cq != NULL) 
-    ibv_destroy_cq(ib_state->cq);
 
   if(ib_state->pd != NULL)
     ibv_dealloc_pd(ib_state->pd);
@@ -381,8 +380,7 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
        We expect to poll N successful send and 1 ACK message */
     int num_cqe = 0, num_poll = 0;
     while(num_poll < num_sent + 1) { 
-      num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
-                            CQE_NUM, pair->wc);
+      num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
       CHECKM(num_cqe >= 0, "Failed to poll CQ");
       if(!num_cqe)
         continue;
@@ -423,8 +421,7 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   while(req_size) {
-    int num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
-                              CQE_NUM, pair->wc);
+    int num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
     CHECKM(num_cqe >= 0, "Failed to poll CQ");
     if(!num_cqe)
       continue;
@@ -460,8 +457,7 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     CHECKM(res == 0, "Failure detected at ibv_post_send");
 
     while(num_cqe <= 0) {
-      num_cqe = ibv_poll_cq(conn->manager_state->ib_state->cq,
-                            CQE_NUM, pair->wc);
+      num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
       CHECKM(num_cqe >= 0, "Failed to poll CQ");
       if(!num_cqe)
         continue;

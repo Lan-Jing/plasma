@@ -1,5 +1,6 @@
 #!/bin/bash
 
+source $HOME/asc21/lj/spack/share/spack/setup-env.sh
 spack load openmpi
 
 MODE=""
@@ -11,4 +12,10 @@ fi
 
 pushd .. && make clean && make $MODE && popd
 
-`which mpirun` --mca btl ^openib -np 2 --host cpn245,cpn250 ./test_2nodes.sh $1 cpn245
+if [[ $# < 2 || $2 == "2" ]]; then
+	`which mpirun` --mca btl ^openib -np 2 --host cpn14,cpn21 \
+	./test_nodes.sh $1 cpn14
+else
+	`which mpirun` --mca btl ^openib -np 4 --host cpn14,cpn21,cpn209,cpn252 \
+	./test_nodes.sh $1 cpn14
+fi

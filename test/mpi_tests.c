@@ -10,12 +10,12 @@
 
 #include "../src/plasma.h"
 #include "../src/plasma_client.h"
-#include "../src/timer.h"
+#include "../src/utils.h"
 
 int size, rank;
-int object_size = 4096,
-	fetch_num = 1000,
-	warmup_num = 5; // Don't count the first few transfer.
+int object_size = 4096 * 16,
+	fetch_num   = 1000,
+	warmup_num  = 10;
 object_id *ids;
 
 char *tmp_str = "hello world";
@@ -37,10 +37,15 @@ void destroy_ids()
 	free(ids);
 }
 
+/**
+ * @brief Test plasma inter-node operations and record performace
+ * 
+ * @param conn plasma context returned by plasma_connect
+ * @param object_size size of the object tested
+ * @return int 
+ */
 int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 {
-	if(rank)
-		return 0;
 	struct timespec timers[3], start, end;
 	memset(timers, 0, sizeof(struct timespec)*3);
 
@@ -77,7 +82,7 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 		clock_gettime(CLOCK_REALTIME, &end);
 		time_add(&timers[2], time_diff(start, end));
 
-		// Create again for remote fetch later
+		// Create these objects again for remote fetch later
 		plasma_create(conn, id, object_size, NULL, 0, &data);
 		// memcpy(data, tmp, sizeof(uint8_t)*object_size);
 		memcpy(data, tmp_str, strlen(tmp_str)+1);
@@ -86,16 +91,30 @@ int plasma_local_benchmarks(plasma_connection *conn, int64_t object_size)
 	}
 
 	// Report latency for local store operations
-	printf("Average latency for plasma_create: %6lu ns\n", time_avg(timers[0], fetch_num));
-	printf("Average latency for plasma_get   : %6lu ns\n", time_avg(timers[1], fetch_num));
-	printf("Average latency for plasma_delete: %6lu ns\n", time_avg(timers[2], fetch_num));
+	if(rank == size-1) {
+		printf("Average latency for plasma_create: %6lu ns\n", time_avg(timers[0], fetch_num));
+		printf("Average latency for plasma_get   : %6lu ns\n", time_avg(timers[1], fetch_num));
+		printf("Average latency for plasma_delete: %6lu ns\n", time_avg(timers[2], fetch_num));
+	}
 	return 0;
 }
 
+/**
+ * @brief Test plasma remote operations, aka plasma_fetch and its performance
+ * 
+ * @param conn plasma context returned by plasma_connect
+ * @param object_size size of the object tested
+ * @return int 
+ */
 int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 {
-	if(!rank)
-		return 0;
+	// we need this as we don't want to fetch local objects
+	object_id *arr = ids + fetch_num; 
+	// we fetch objects from all other manager processes
+	fetch_num *= size-1; 
+	// then shuffle ids to randomize remote fetch calls
+	shuffle(arr, fetch_num, sizeof(object_id));
+
 	struct timespec timer, start, end;
 	memset(&timer, 0, sizeof(struct timespec));
 
@@ -103,11 +122,11 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 	memset(is_fetched, 0, fetch_num * sizeof(int));
 
 	/* A warmup to hide performance degradation from connection setup */
-	plasma_fetch(conn, warmup_num, ids, is_fetched);
+	plasma_fetch(conn, warmup_num, arr, is_fetched);
 	printf("Network benchmark starts\n");
 
 	clock_gettime(CLOCK_REALTIME, &start);
-	plasma_fetch(conn, fetch_num-warmup_num, ids+warmup_num, is_fetched+warmup_num);
+	plasma_fetch(conn, fetch_num-warmup_num, arr+warmup_num, is_fetched+warmup_num);
 	clock_gettime(CLOCK_REALTIME, &end);
 	time_add(&timer, time_diff(start, end));
 
@@ -116,7 +135,7 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 		if(i == warmup_num) {
 			uint8_t *data = NULL;
 			int64_t size = 0;
-			plasma_get(conn, ids[i], &size, &data, NULL, NULL);
+			plasma_get(conn, arr[i], &size, &data, NULL, NULL);
 			LOG_DEBUG("Data fetched: %s", data);
 		}
 	}
@@ -124,8 +143,8 @@ int plasma_network_benchmarks(plasma_connection *conn, uint64_t object_size)
 	// Report latency for batched fetch requests
 	printf("Average latency for %d batched fetch requests of object size %ld: %6lu ns\n", 
 		   fetch_num, object_size, time_avg(timer, fetch_num));
-	printf("Test done in: %lf(s)\nThroughput: %lf(Mops)\n", 
-		   time_avg(timer, 1)/1e9, (double)fetch_num*1e3/time_avg(timer, 1));
+	printf("Test done in: %lf(s)\nThroughput: %lf(ops)\n", 
+		   time_avg(timer, 1)/1e9, (double)fetch_num*1e9/time_avg(timer, 1));
 
 	free(is_fetched);
 	return 0;
@@ -180,23 +199,30 @@ int main(int argc, char *argv[])
 	assert(conn != NULL);
 	MPI_Barrier(MPI_COMM_WORLD); // make sure both clients are connected.
 
-	if(rank == 0) {
+	if(rank > 0) {
 		generate_ids(fetch_num);
-		
+
 		LOG_DEBUG("Local benchmark on MPI process at rank %d", rank);
 		int res = plasma_local_benchmarks(conn, (uint64_t)object_size);
 		assert(res == 0);
 
-		// should send object ids to the remote client. At this time no object is present on the other side.
-		MPI_Send(ids, fetch_num * sizeof(object_id), MPI_BYTE, 1, 0, MPI_COMM_WORLD);
+		MPI_Gather(ids, fetch_num * sizeof(object_id), MPI_BYTE, 
+				   NULL, 0, MPI_BYTE, 
+				   0, MPI_COMM_WORLD);
+		// MPI_Send(ids, fetch_num * sizeof(object_id), MPI_BYTE, 0, 0, MPI_COMM_WORLD);
+		MPI_Barrier(MPI_COMM_WORLD);
 	} else {
-		ids = (object_id*)malloc(sizeof(object_id) * fetch_num);
+		ids = (object_id*)malloc(sizeof(object_id) * fetch_num * size);
 		assert(ids != NULL);
 
-		MPI_Recv(ids, fetch_num * sizeof(object_id), MPI_BYTE, 0, 0, MPI_COMM_WORLD, NULL);
-		
-		// Test remote fetch, measure bandwidth and latency.
-		LOG_DEBUG("Network benchmark on MPI process at rank %d", rank);
+		MPI_Gather(MPI_IN_PLACE, 0, MPI_BYTE,
+				   ids, fetch_num * sizeof(object_id), MPI_BYTE,
+				   0, MPI_COMM_WORLD);
+		// MPI_Recv(ids, fetch_num * sizeof(object_id), MPI_BYTE, 1, 0, MPI_COMM_WORLD, NULL);
+		MPI_Barrier(MPI_COMM_WORLD);
+
+		// Test remote fetch, measure throughput and latency.
+		LOG_DEBUG("Netowrk benchmark on MPI process at rank %d", rank);
 		int res = plasma_network_benchmarks(conn, (uint64_t)object_size);
 		assert(res == 0);
 	}
