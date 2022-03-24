@@ -381,8 +381,14 @@ void send_queued_request(event_loop *loop,
     struct timespec start, end, done_time; 
     memset(&done_time, 0, sizeof(struct timespec));
     clock_gettime(CLOCK_REALTIME, &start);
-
-    ib_send_object_chunk(conn, buf);
+    
+    if(buf->data_size + buf->metadata_size >= IB_READ_MIN_SIZE) {
+      /* do a handshake here */
+      ib_send_read_info(conn, buf);
+      ib_wait_object_chunk(conn, buf);
+    } else {
+      ib_send_object_chunk(conn, buf);
+    }
     
     clock_gettime(CLOCK_REALTIME, &end);
     time_add(&done_time, time_diff(start, end));
@@ -445,7 +451,11 @@ void process_data_chunk(event_loop *loop,
   memset(&done_time, 0, sizeof(struct timespec));
   clock_gettime(CLOCK_REALTIME, &start);
 
-  int done = ib_recv_object_chunk(conn, buf);
+  int done = 0; 
+  if(buf->data_size + buf->metadata_size >= IB_READ_MIN_SIZE)
+    done = ib_read_object_chunk(conn, buf);
+  else
+    done = ib_recv_object_chunk(conn, buf);
   
   clock_gettime(CLOCK_REALTIME, &end);
   time_add(&done_time, time_diff(start, end));
@@ -563,8 +573,7 @@ void process_transfer_request(event_loop *loop,
   utstring_printf(ip_addr, "%d.%d.%d.%d", addr[0], addr[1], addr[2], addr[3]);
   client_connection *manager_conn =
 #ifdef IB
-      get_manager_ib_connection(conn->manager_state, utstring_body(ip_addr), port,
-                                0, 0);
+      get_manager_ib_connection(conn->manager_state, utstring_body(ip_addr), port);
 #else
       get_manager_connection(conn->manager_state, utstring_body(ip_addr), port);
 #endif
@@ -599,6 +608,10 @@ void process_data_request(event_loop *loop,
   CHECK(conn->cursor == 0);
 
 #ifdef IB
+  if(data_size + metadata_size >= IB_READ_MIN_SIZE) {
+    /* do a handshake here */
+    ib_recv_read_info(conn, buf);
+  }
   /* No need to switch the socket since IB data doesn't invoke these callbacks */
   process_data_chunk(NULL, 0, (void*)conn, 0);
 #else
@@ -638,7 +651,7 @@ void request_transfer_from(client_connection *client_conn,
   */
   client_connection *manager_conn =
 #ifdef IB
-      get_manager_ib_connection(client_conn->manager_state, addr, port, 0, 0);
+      get_manager_ib_connection(client_conn->manager_state, addr, port);
 #else
       get_manager_connection(client_conn->manager_state, addr, port);
 #endif
@@ -836,8 +849,7 @@ client_connection *new_client_connection(event_loop *loop,
     conn->slid = 0;
   } else {
     LOG_DEBUG("Manager at %d connected to another manager process.", conn->fd);
-    conn->slid = setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER,
-                               0, 0);
+    conn->slid = setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER);
   }
 #endif
 

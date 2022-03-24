@@ -225,8 +225,7 @@ int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
   return 0;
 }
 
-int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate,
-                  uint32_t rkey, uint64_t raddr)
+int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
 {
   CHECKM(ib_state != NULL, "Set up IB state before connecting queue pairs.");
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
@@ -342,8 +341,7 @@ void free_ib_conn(IB_state *ib_state, int slid)
 }
 
 client_connection *get_manager_ib_connection(plasma_manager_state *state,
-                                             const char *ip_addr, int port,
-                                             uint32_t rkey, uint64_t raddr) 
+                                             const char *ip_addr, int port)
 {
   /* TODO(swang): Should probably check whether ip_addr and port belong to us.
    */
@@ -366,7 +364,7 @@ client_connection *get_manager_ib_connection(plasma_manager_state *state,
     /* This will search for an existing IB connection then create a new one */
     char message = 'M';
     write_bytes(fd, (uint8_t*)&message, 1);
-    manager_conn->slid = setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT, 0, 0);
+    manager_conn->slid = setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
 
     /* TODO(swang): Handle the case when connection to this manager was
      * unsuccessful. */
@@ -550,5 +548,183 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   conn->cursor = 0;
   return 1;
 }
+
+void ib_send_read_info(client_connection *conn, plasma_request_buffer *buf)
+{
+  CHECKM(buf != NULL, "NULL buffer passed in");
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
+  CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid); 
+
+  /* register send buffer(to be read) */
+  CHECKM(pair->read_mr == NULL, "Deregister read buffer before calling this");
+  pair->read_mr = ibv_reg_mr(conn->manager_state->ib_state->pd,
+                             (void*)buf->data, buf->data_size + buf->metadata_size,
+                             IBV_ACCESS_LOCAL_WRITE |
+                             IBV_ACCESS_REMOTE_READ |
+                             IBV_ACCESS_REMOTE_WRITE);
+  CHECKM(pair->read_mr != NULL, "Failed to register Memory Region.");
+
+  QP_info local_read_info = {
+    .rkey  = (uint32_t)pair->read_mr->rkey, 
+    .raddr = (uint64_t)buf->data,
+  }
+  memcpy(pair->ib_send_buf, &local_read_info, sizeof(QP_info));
+  int res = post_send(pair->ib_send_buf, sizeof(QP_info), pair->send_mr->lkey,
+                      (uint64_t)pair->ib_send_buf, pair->qp);
+  CHECKM(res == 0, "Failure detected at ibv_post_send");
+
+  int num_cqe = 0;
+  while(!num_cqe) {
+    num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    if(!num_cqe)
+      continue;
+
+    LOG_DEBUG("rdma_info sender polling CQ, got %d CQEs", num_cqe);
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s",
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+  }
+}
+
+void ib_recv_read_info(client_connection *conn, plasma_request_buffer *buf)
+{
+  CHECKM(buf != NULL, "NULL buffer passed in");
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
+  CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
+
+  /* register recv buffer(to be filled) */
+  CHECKM(pair->read_mr == NULL, "Deregister read buffer before calling this");
+  pair->read_mr = ibv_reg_mr(conn->manager_state->ib_state->pd,
+                             (void*)buf->data, buf->data_size + buf->metadata_size,
+                             IBV_ACCESS_LOCAL_WRITE |
+                             IBV_ACCESS_REMOTE_READ |
+                             IBV_ACCESS_REMOTE_WRITE);
+  CHECKM(pair->read_mr != NULL, "Failed to register Memory Region.");
+
+  QP_info remote_read_info;
+  int num_cqe = 0;
+  while(!num_cqe) {
+    num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    if(!num_cqe)
+      continue;
+
+    LOG_DEBUG("rdma_info receiver polling CQ, got %d CQEs", num_cqe);
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s",
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    
+      if(pair->wc[i].opcode == IBV_WC_RECV) {
+        /* Copy out remote parameters then re-generate one */
+        memcpy(&remote_read_info, (uint8_t*)pair->wc[i].wr_id, sizeof(QP_info));
+        int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
+                            pair->wc[i].wr_id, pair->qp);
+        CHECKM(res == 0, "Failure at ibv_post_recv");
+      }
+    }
+  }
+
+  pair->rkey  = remote_read_info.rkey;
+  pair->raddr = remote_read_info.raddr;
+  LOG_DEBUG("Received raddr: %p, rkey: %lu", (void*)pair->raddr, pair->rkey);
+}
+
+void ib_wait_object_chunk(client_connection *conn, plasma_request_buffer *buf)
+{
+  CHECKM(buf != NULL, "NULL buffer passed in");
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
+  CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
+
+  int num_cqe = 0;
+  while(!num_cqe) {
+    num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    if(!num_cqe)
+      continue;
+
+    LOG_DEBUG("RDMA sender(waiting) polling CQ, got %d CQEs", num_cqe);
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s",
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    
+      if(pair->wc[i].opcode == IBV_WC_RECV) {
+        /* sync done, re-generate one */
+        int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
+                            pair->wc[i].wr_id, pair->qp);
+        CHECKM(res == 0, "Failure at ibv_post_recv");
+      }
+    }
+  }
+
+  if(pair->read_mr)
+    ibv_dereg_mr(pair->read_mr);
+}
+
+int  ib_read_object_chunk(client_connection *conn, plasma_request_buffer *buf)
+{
+  CHECKM(buf != NULL, "NULL buffer passed in");
+  IB_pair_info *pair = NULL;
+  HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
+  CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
+
+  int res = post_read(buf->data, buf->data_size + buf->metadata_size, pair->read_mr->lkey,
+                      (uint64_t)buf->data, pair->qp,
+                      pair->raddr, pair->rkey);
+  CHECKM(res == 0, "Failure detected at ibv_post_send");
+
+  int num_cqe = 0;
+  while(!num_cqe) {
+    num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    if(!num_cqe)
+      continue;
+
+    LOG_DEBUG("RDMA receiver polling CQ, got %d CQEs", num_cqe);
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s",
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+  }
+
+  char *str = "sync";
+  memcpy(pair->ib_send_buf, str, strlen(str)+1);
+  res = post_send(pair->ib_send_buf, BUFSIZE, pair->send_mr->lkey,
+                  (uint64_t)pair->ib_send_buf, pair->qp);
+  CHECKM(res == 0, "Failure detected at ibv_post_send");
+
+  num_cqe = 0;
+  while(!num_cqe) {
+    num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
+    CHECKM(num_cqe >= 0, "Failed to poll CQ");
+    if(!num_cqe)
+      continue;
+
+    LOG_DEBUG("RDMA receiver polling CQ, got %d CQEs", num_cqe);
+    for(int i = 0;i < num_cqe;i++) {
+      LOG_DEBUG("Work request %" PRIu64 " status: %s",
+                pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
+      CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
+             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+    }
+  }
+
+  if(pair->read_mr != NULL)
+    ibv_dereg_mr(pair->read_mr);
+  return 1;
+}
+
 
 #endif // IB
