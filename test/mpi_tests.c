@@ -13,8 +13,8 @@
 #include "../src/utils.h"
 
 int size, rank;
-int object_size = 4096 * 16,
-	fetch_num   = 1000,
+int object_size = 4096,
+	fetch_num   = 50,
 	warmup_num  = 10;
 object_id *ids;
 

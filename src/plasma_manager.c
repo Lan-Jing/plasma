@@ -513,12 +513,6 @@ client_connection *get_manager_connection(plasma_manager_state *state,
     manager_conn = malloc(sizeof(client_connection));
     CHECKM(manager_conn != NULL, "Failed to allocate manager connection");
 
-  #ifdef IB 
-    /* This will search for an existing IB connection then create a new one */
-    char message = 'M';
-    write_bytes(fd, (uint8_t*)&message, 1);
-    manager_conn->slid = setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
-  #endif
     /* TODO(swang): Handle the case when connection to this manager was
      * unsuccessful. */
     manager_conn->fd = fd;
@@ -559,13 +553,21 @@ void process_transfer_request(event_loop *loop,
   buf->data_size = data_size;
   buf->metadata_size = metadata_size;
 
+  /* For read-based rendezvous protocol we need to register MR here, then send 
+     raddr and rkey to the remote side for later read */
+
   /* try to fetch a established connection to the other manager, 
      create one if it doesn't exist. */
   UT_string *ip_addr;
   utstring_new(ip_addr);
   utstring_printf(ip_addr, "%d.%d.%d.%d", addr[0], addr[1], addr[2], addr[3]);
   client_connection *manager_conn =
+#ifdef IB
+      get_manager_ib_connection(conn->manager_state, utstring_body(ip_addr), port,
+                                0, 0);
+#else
       get_manager_connection(conn->manager_state, utstring_body(ip_addr), port);
+#endif
   utstring_free(ip_addr);
 
   if (manager_conn->transfer_queue == NULL) {
@@ -635,7 +637,11 @@ void request_transfer_from(client_connection *client_conn,
      register memory region with the allocated buffer.
   */
   client_connection *manager_conn =
+#ifdef IB
+      get_manager_ib_connection(client_conn->manager_state, addr, port, 0, 0);
+#else
       get_manager_connection(client_conn->manager_state, addr, port);
+#endif
   plasma_request_buffer *transfer_request =
       malloc(sizeof(plasma_request_buffer));
   transfer_request->type = PLASMA_TRANSFER;
@@ -830,7 +836,8 @@ client_connection *new_client_connection(event_loop *loop,
     conn->slid = 0;
   } else {
     LOG_DEBUG("Manager at %d connected to another manager process.", conn->fd);
-    conn->slid = setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER);
+    conn->slid = setup_ib_conn(conn->manager_state->ib_state, conn->fd, MANAGER_SERVER,
+                               0, 0);
   }
 #endif
 

@@ -9,6 +9,7 @@
 #include "io.h"
 #include "ib.h"
 #include "utils.h"
+#include "utstring.h"
 #include "state/db.h"
 #include "state/object_table.h"
 
@@ -77,6 +78,8 @@ int sock_send_qp_info(int fd, QP_info *local_qp_info)
   QP_info qp_info_buf = {
     .qp_num = htonl(local_qp_info->qp_num), 
     .lid    = htons(local_qp_info->lid),
+    .rkey   = htonl(local_qp_info->rkey),
+    .raddr  = htonll(local_qp_info->raddr),
   };
 
   int res = write_bytes(fd, (uint8_t*)&qp_info_buf, sizeof(QP_info));
@@ -94,6 +97,8 @@ int sock_recv_qp_info(int fd, QP_info *remote_qp_info)
 
   remote_qp_info->qp_num = ntohl(qp_info_buf.qp_num);
   remote_qp_info->lid    = ntohs(qp_info_buf.lid);
+  remote_qp_info->rkey   = ntohl(qp_info_buf.rkey);
+  remote_qp_info->raddr  = ntohll(qp_info_buf.raddr);
   return 0;
 }
 
@@ -140,6 +145,30 @@ int post_recv(unsigned char *buf, uint32_t req_size, uint32_t lkey,
   return ibv_post_recv(qp, &recv_wr, &bad_recv_wr);
 }
 
+int post_write_signaled(unsigned char *buf, uint32_t req_size, uint32_t lkey,
+                        uint64_t wr_id, struct ibv_qp *qp,
+                        uint64_t raddr, uint32_t rkey)
+{
+  struct ibv_send_wr *bad_send_wr;
+
+  struct ibv_sge list = {
+    .addr   = (uintptr_t)buf,
+    .length = req_size,
+    .lkey   = lkey,
+  };
+
+  struct ibv_send_wr send_wr = {
+    .wr_id               = wr_id,
+    .sg_list             = &list,
+    .num_sge             = 1,
+    .opcode              = IBV_WR_RDMA_WRITE,
+    .send_flags          = IBV_SEND_SIGNALED, // this will generate a CQE at the receiver side
+    .wr.rdma.remote_addr = raddr,
+    .wr.rdma.rkey        = rkey,
+  };
+
+  return ibv_post_send(qp, &send_wr, &bad_send_wr);
+}
 
 int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
 {
@@ -196,7 +225,8 @@ int bringup_qp(struct ibv_qp *qp, QP_info remote_qp_info)
   return 0;
 }
 
-int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
+int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate,
+                  uint32_t rkey, uint64_t raddr)
 {
   CHECKM(ib_state != NULL, "Set up IB state before connecting queue pairs.");
   IB_pair_info *pair = (IB_pair_info*)malloc(sizeof(IB_pair_info));
@@ -240,6 +270,7 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
   if(tmp != NULL) {
     LOG_DEBUG("IB connection to lid %d already exists", remote_qp_info.lid);
     ibv_destroy_qp(pair->qp);
+    ibv_destroy_cq(pair->cq);
     free(pair);
     return tmp_slid;
   } else {
@@ -308,6 +339,49 @@ void free_ib_conn(IB_state *ib_state, int slid)
   if(pair->wc != NULL)
     free(pair->wc);
   free(pair);
+}
+
+client_connection *get_manager_ib_connection(plasma_manager_state *state,
+                                             const char *ip_addr, int port,
+                                             uint32_t rkey, uint64_t raddr) 
+{
+  /* TODO(swang): Should probably check whether ip_addr and port belong to us.
+   */
+  UT_string *ip_addr_port;
+  utstring_new(ip_addr_port);
+  utstring_printf(ip_addr_port, "%s:%d", ip_addr, port);
+  client_connection *manager_conn;
+  HASH_FIND(manager_hh, state->manager_connections, utstring_body(ip_addr_port),
+            utstring_len(ip_addr_port), manager_conn);
+  LOG_DEBUG("Getting manager connection to %s on DB client %d",
+            utstring_body(ip_addr_port), get_client_id(state->db));
+  if (!manager_conn) {
+    /* If we don't already have a connection to this manager, start one. */
+    int fd = plasma_manager_connect(ip_addr, port);
+    CHECK(fd >= 0);
+    
+    manager_conn = malloc(sizeof(client_connection));
+    CHECKM(manager_conn != NULL, "Failed to allocate manager connection");
+
+    /* This will search for an existing IB connection then create a new one */
+    char message = 'M';
+    write_bytes(fd, (uint8_t*)&message, 1);
+    manager_conn->slid = setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT, 0, 0);
+
+    /* TODO(swang): Handle the case when connection to this manager was
+     * unsuccessful. */
+    manager_conn->fd = fd;
+    manager_conn->manager_state = state;
+    manager_conn->transfer_queue = NULL;
+    manager_conn->cursor = 0;
+    manager_conn->ip_addr_port = strdup(utstring_body(ip_addr_port));
+    HASH_ADD_KEYPTR(manager_hh,
+                    manager_conn->manager_state->manager_connections,
+                    manager_conn->ip_addr_port,
+                    strlen(manager_conn->ip_addr_port), manager_conn);
+  }
+  utstring_free(ip_addr_port);
+  return manager_conn;
 }
 
 int setup_ib(IB_state *ib_state)
