@@ -568,7 +568,7 @@ void ib_send_read_info(client_connection *conn, plasma_request_buffer *buf)
   QP_info local_read_info = {
     .rkey  = (uint32_t)pair->read_mr->rkey, 
     .raddr = (uint64_t)buf->data,
-  }
+  };
   memcpy(pair->ib_send_buf, &local_read_info, sizeof(QP_info));
   int res = post_send(pair->ib_send_buf, sizeof(QP_info), pair->send_mr->lkey,
                       (uint64_t)pair->ib_send_buf, pair->qp);
@@ -607,7 +607,7 @@ void ib_recv_read_info(client_connection *conn, plasma_request_buffer *buf)
                              IBV_ACCESS_REMOTE_WRITE);
   CHECKM(pair->read_mr != NULL, "Failed to register Memory Region.");
 
-  QP_info remote_read_info;
+  QP_info remote_read_info = {0};
   int num_cqe = 0;
   while(!num_cqe) {
     num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
@@ -634,7 +634,32 @@ void ib_recv_read_info(client_connection *conn, plasma_request_buffer *buf)
 
   pair->rkey  = remote_read_info.rkey;
   pair->raddr = remote_read_info.raddr;
-  LOG_DEBUG("Received raddr: %p, rkey: %lu", (void*)pair->raddr, pair->rkey);
+  LOG_DEBUG("Received raddr: %p, rkey: %u", (void*)pair->raddr, pair->rkey);
+}
+
+int post_read(unsigned char *buf, uint32_t req_size, uint32_t lkey, 
+              uint64_t wr_id, struct ibv_qp *qp,
+              uint64_t raddr, uint32_t rkey)
+{
+  struct ibv_send_wr *bad_send_wr;
+
+  struct ibv_sge list = {
+    .addr   = (uintptr_t)buf,
+    .length = req_size,
+    .lkey   = lkey
+  };
+
+  struct ibv_send_wr send_wr = {
+    .wr_id               = wr_id,
+    .sg_list             = &list,
+    .num_sge             = 1,
+    .opcode              = IBV_WR_RDMA_READ,
+    .send_flags          = IBV_SEND_SIGNALED,
+    .wr.rdma.remote_addr = raddr,
+    .wr.rdma.rkey        = rkey,
+  };
+
+  return ibv_post_send(qp, &send_wr, &bad_send_wr);
 }
 
 void ib_wait_object_chunk(client_connection *conn, plasma_request_buffer *buf)

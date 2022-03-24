@@ -39,6 +39,7 @@ typedef struct {
   struct ibv_mr *send_mr;
   struct ibv_mr *read_mr;
   uint8_t *ib_recv_buf; // send/recv buffers are pre-pinned
+  uint8_t *ib_send_buf;
   uint8_t *ib_read_buf; // read buffer is pinned and registered on-the-fly
   int64_t bufsize;
 
