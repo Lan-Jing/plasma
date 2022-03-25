@@ -102,7 +102,16 @@ int sock_recv_qp_info(int fd, QP_info *remote_qp_info)
   return 0;
 }
 
-/* Below are wrappers of ibv_post_send/ibv_post_recv operations */
+/**
+ * @brief Below are wrappers of ibv_post_send/ibv_post_recv operations
+ * 
+ * @param buf Buffer to be sent/filled
+ * @param req_size size of the buffer
+ * @param lkey local key of the memory region
+ * @param wr_id work request id
+ * @param qp queue pair that sends data
+ * @return int 
+ */
 int post_send(unsigned char *buf, uint32_t req_size, uint32_t lkey, 
               uint64_t wr_id, struct ibv_qp *qp)
 {
@@ -145,24 +154,24 @@ int post_recv(unsigned char *buf, uint32_t req_size, uint32_t lkey,
   return ibv_post_recv(qp, &recv_wr, &bad_recv_wr);
 }
 
-int post_write_signaled(unsigned char *buf, uint32_t req_size, uint32_t lkey,
-                        uint64_t wr_id, struct ibv_qp *qp,
-                        uint64_t raddr, uint32_t rkey)
+int post_read(unsigned char *buf, uint32_t req_size, uint32_t lkey, 
+              uint64_t wr_id, struct ibv_qp *qp,
+              uint64_t raddr, uint32_t rkey)
 {
   struct ibv_send_wr *bad_send_wr;
 
   struct ibv_sge list = {
     .addr   = (uintptr_t)buf,
     .length = req_size,
-    .lkey   = lkey,
+    .lkey   = lkey
   };
 
   struct ibv_send_wr send_wr = {
     .wr_id               = wr_id,
     .sg_list             = &list,
     .num_sge             = 1,
-    .opcode              = IBV_WR_RDMA_WRITE,
-    .send_flags          = IBV_SEND_SIGNALED, // this will generate a CQE at the receiver side
+    .opcode              = IBV_WR_RDMA_READ,
+    .send_flags          = IBV_SEND_SIGNALED,
     .wr.rdma.remote_addr = raddr,
     .wr.rdma.rkey        = rkey,
   };
@@ -334,6 +343,8 @@ void free_ib_conn(IB_state *ib_state, int slid)
     ibv_dereg_mr(pair->send_mr);
   if(pair->recv_mr != NULL)
     ibv_dereg_mr(pair->recv_mr);
+  if(pair->read_mr != NULL)
+    ibv_dereg_mr(pair->read_mr);
   if(pair->ib_recv_buf != NULL)
     free(pair->ib_recv_buf);
   if(pair->ib_send_buf != NULL)
@@ -346,8 +357,6 @@ void free_ib_conn(IB_state *ib_state, int slid)
 client_connection *get_manager_ib_connection(plasma_manager_state *state,
                                              const char *ip_addr, int port)
 {
-  /* TODO(swang): Should probably check whether ip_addr and port belong to us.
-   */
   UT_string *ip_addr_port;
   utstring_new(ip_addr_port);
   utstring_printf(ip_addr_port, "%s:%d", ip_addr, port);
@@ -369,8 +378,6 @@ client_connection *get_manager_ib_connection(plasma_manager_state *state,
     write_bytes(fd, (uint8_t*)&message, 1);
     manager_conn->slid = setup_ib_conn(state->ib_state, fd, MANAGER_CLIENT);
 
-    /* TODO(swang): Handle the case when connection to this manager was
-     * unsuccessful. */
     manager_conn->fd = fd;
     manager_conn->manager_state = state;
     manager_conn->transfer_queue = NULL;
@@ -433,12 +440,12 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   IB_pair_info *pair = NULL;
   HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
+  LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
 
   int num_sent = 0;
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
   req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
   while(req_size) {
-    LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
     memcpy(pair->ib_send_buf, buf->data + conn->cursor, req_size);
     int res = post_send(pair->ib_send_buf, req_size, pair->send_mr->lkey,
                         (uint64_t)pair->ib_send_buf, pair->qp);
@@ -470,14 +477,14 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
       
         if(pair->wc[i].opcode == IBV_WC_RECV) {
           // re-generate a recv request
+          LOG_DEBUG("Sync successful");
+          num_sent = 0;
           int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
                               pair->wc[i].wr_id, pair->qp);
           CHECKM(res == 0, "Failure at ibv_post_recv");
         }
       }
     }
-    LOG_DEBUG("Sync successful");
-    num_sent = 0;
   }
 
   LOG_DEBUG("Writing to manager %d finished", conn->slid);
@@ -505,8 +512,8 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
       LOG_DEBUG("Work request %" PRIu64 " status: %s",
                 pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
       CHECKM(pair->wc[i].status == IBV_WC_SUCCESS,
-             "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
-    
+             "Recv failed with: %s", ibv_wc_status_str(pair->wc[i].status));
+  
       // mind that ib send ensures in-order delivery
       memcpy(buf->data + conn->cursor, (uint8_t*)pair->wc[i].wr_id, req_size);
 
@@ -537,7 +544,7 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
       if(!num_cqe)
         continue;
 
-      LOG_DEBUG("Receiver polling CQ, got %d CQEs", num_cqe);
+      LOG_DEBUG("Receiver(ACK) polling CQ, got %d CQEs", num_cqe);
       for(int i = 0;i < num_cqe;i++) {
         LOG_DEBUG("Work request %" PRIu64 " status: %s",
                   pair->wc[i].wr_id, ibv_wc_status_str(pair->wc[i].status));
@@ -545,6 +552,7 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
                "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
       }
     }
+    num_recv = 0;
   }
 
   LOG_DEBUG("Reading from mamanger %d finished", conn->slid);
@@ -638,31 +646,6 @@ void ib_recv_read_info(client_connection *conn, plasma_request_buffer *buf)
   pair->rkey  = remote_read_info.rkey;
   pair->raddr = remote_read_info.raddr;
   LOG_DEBUG("Received raddr: %p, rkey: %u", (void*)pair->raddr, pair->rkey);
-}
-
-int post_read(unsigned char *buf, uint32_t req_size, uint32_t lkey, 
-              uint64_t wr_id, struct ibv_qp *qp,
-              uint64_t raddr, uint32_t rkey)
-{
-  struct ibv_send_wr *bad_send_wr;
-
-  struct ibv_sge list = {
-    .addr   = (uintptr_t)buf,
-    .length = req_size,
-    .lkey   = lkey
-  };
-
-  struct ibv_send_wr send_wr = {
-    .wr_id               = wr_id,
-    .sg_list             = &list,
-    .num_sge             = 1,
-    .opcode              = IBV_WR_RDMA_READ,
-    .send_flags          = IBV_SEND_SIGNALED,
-    .wr.rdma.remote_addr = raddr,
-    .wr.rdma.rkey        = rkey,
-  };
-
-  return ibv_post_send(qp, &send_wr, &bad_send_wr);
 }
 
 void ib_wait_object_chunk(client_connection *conn, plasma_request_buffer *buf)
