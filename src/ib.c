@@ -296,6 +296,9 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
                              IBV_ACCESS_REMOTE_READ |
                              IBV_ACCESS_REMOTE_WRITE);
   CHECKM(pair->send_mr != NULL, "Failed to register Memory Region.");
+  
+  pair->read_mr = NULL;
+  pair->ib_read_buf = NULL;
 
   bringup_qp(pair->qp, remote_qp_info);
   /* Turns out that we must PRE-post receive work requests before taking in send requests */
@@ -692,8 +695,11 @@ void ib_wait_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     }
   }
 
-  if(pair->read_mr)
+  if(pair->read_mr) {
     ibv_dereg_mr(pair->read_mr);
+    pair->read_mr = NULL;
+    pair->ib_read_buf = NULL;
+  }
 }
 
 int  ib_read_object_chunk(client_connection *conn, plasma_request_buffer *buf)
@@ -746,8 +752,11 @@ int  ib_read_object_chunk(client_connection *conn, plasma_request_buffer *buf)
     }
   }
 
-  if(pair->read_mr != NULL)
+  if(pair->read_mr != NULL) {
     ibv_dereg_mr(pair->read_mr);
+    pair->read_mr = NULL;
+    pair->ib_read_buf = NULL;
+  }
   return 1;
 }
 

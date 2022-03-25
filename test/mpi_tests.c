@@ -14,7 +14,7 @@
 
 int size, rank;
 int object_size = 4096,
-	fetch_num   = 50,
+	fetch_num   = 1000,
 	warmup_num  = 10;
 object_id *ids;
 
