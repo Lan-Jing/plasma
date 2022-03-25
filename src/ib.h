@@ -26,8 +26,8 @@ static inline uint64_t ntohll (uint64_t x) { return x; }
 #define IB_MTU  IBV_MTU_4096
 #define IB_PORT 1
 #define IB_SL   0
-#define CQE_NUM 100
-#define IB_BUFSIZE 4096
+#define CQE_NUM 1000
+#define IB_BUFSIZE BUFSIZE * CQE_NUM
 #define IB_READ_MIN_SIZE 1024 * 1024
 
 /* IB info for connection between any two managers 

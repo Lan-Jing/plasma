@@ -289,7 +289,7 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
   pair->wc = (struct ibv_wc*)malloc(sizeof(struct ibv_wc) * (CQE_NUM + 10));
   CHECKM(pair->wc != NULL, "Failed to allocate completion buffer of size %d.", CQE_NUM);
   
-  pair->bufsize = BUFSIZE * CQE_NUM;
+  pair->bufsize = IB_BUFSIZE;
   pair->ib_recv_buf = (uint8_t*)malloc(pair->bufsize);
   pair->ib_send_buf = (uint8_t*)malloc(pair->bufsize);
   CHECKM(pair->ib_recv_buf != NULL && pair->ib_send_buf != NULL, 
@@ -310,14 +310,11 @@ int setup_ib_conn(IB_state *ib_state, int fd, enum manager_state mstate)
   pair->ib_read_buf = NULL;
 
   bringup_qp(pair->qp, remote_qp_info);
-  /* Turns out that we must PRE-post receive work requests before taking in send requests */
-  uint8_t *buf_ptr = pair->ib_recv_buf;
-  for(int i = 0;i < CQE_NUM;i++) {
-    int res = post_recv(buf_ptr, BUFSIZE, pair->recv_mr->lkey,
-                        (uint64_t)buf_ptr, pair->qp);
-    CHECKM(res == 0, "Failure detected at ibv_post_recv");
-    buf_ptr += BUFSIZE; // segement data buffer into CQE_NUM chunks
-  }
+
+  /* PRE-post receive work requests before taking in send requests */
+  int res = post_recv(pair->ib_recv_buf, pair->bufsize, pair->recv_mr->lkey,
+                      (uint64_t)pair->ib_recv_buf, pair->qp);
+  CHECKM(res == 0, "Failure detected at ibv_post_recv");
 
   HASH_ADD_INT(ib_state->pairs, slid, pair);
   LOG_DEBUG("IB port %d connects to <%d:%d>", 
@@ -442,26 +439,22 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
   LOG_DEBUG("Writing data through IB Send to manager at lid %d", conn->slid);
 
-  int num_sent = 0;
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
-  req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
+  req_size = req_size > IB_BUFSIZE ? IB_BUFSIZE : req_size;
   while(req_size) {
     memcpy(pair->ib_send_buf, buf->data + conn->cursor, req_size);
     int res = post_send(pair->ib_send_buf, req_size, pair->send_mr->lkey,
                         (uint64_t)pair->ib_send_buf, pair->qp);
     CHECKM(res == 0, "Failure detectd at ibv_post_send");
 
-    num_sent++;
     conn->cursor += req_size;
     req_size = buf->data_size + buf->metadata_size - conn->cursor;
-    req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
-    if(req_size && num_sent < CQE_NUM)
-      continue;
+    req_size = req_size > IB_BUFSIZE ? IB_BUFSIZE : req_size;
 
     /* The receiver may have run out of recv requests now, sync by doing a receive.
-       We expect to poll N successful send and 1 ACK message */
+       We expect to poll 1 successful send and 1 ACK message */
     int num_cqe = 0, num_poll = 0;
-    while(num_poll < num_sent + 1) { 
+    while(num_poll < 2) { 
       num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
       CHECKM(num_cqe >= 0, "Failed to poll CQ");
       if(!num_cqe)
@@ -478,7 +471,6 @@ void ib_send_object_chunk(client_connection *conn, plasma_request_buffer *buf)
         if(pair->wc[i].opcode == IBV_WC_RECV) {
           // re-generate a recv request
           LOG_DEBUG("Sync successful");
-          num_sent = 0;
           int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
                               pair->wc[i].wr_id, pair->qp);
           CHECKM(res == 0, "Failure at ibv_post_recv");
@@ -499,9 +491,8 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
   HASH_FIND_INT(conn->manager_state->ib_state->pairs, &conn->slid, pair);
   CHECKM(pair != NULL, "Manager connected at lid %d not found", conn->slid);
 
-  int num_recv = 0;
   uint32_t req_size = buf->data_size + buf->metadata_size - conn->cursor;
-  req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
+  req_size = req_size > IB_BUFSIZE ? IB_BUFSIZE : req_size;
   while(req_size) {
     int num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
     CHECKM(num_cqe >= 0, "Failed to poll CQ");
@@ -517,27 +508,23 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
       // mind that ib send ensures in-order delivery
       memcpy(buf->data + conn->cursor, (uint8_t*)pair->wc[i].wr_id, req_size);
 
-      num_recv++;
-      int res = post_recv((uint8_t*)pair->wc[i].wr_id, BUFSIZE, pair->recv_mr->lkey,
+      int res = post_recv((uint8_t*)pair->wc[i].wr_id, pair->bufsize, pair->recv_mr->lkey,
                           pair->wc[i].wr_id, pair->qp);
       CHECKM(res == 0, "Failure detected at ibv_post_recv");
 
       conn->cursor += req_size;
       req_size = buf->data_size + buf->metadata_size - conn->cursor;
-      req_size = req_size > BUFSIZE ? BUFSIZE : req_size;
+      req_size = req_size > IB_BUFSIZE ? IB_BUFSIZE : req_size;
     }
-    
-    if(req_size && num_recv < CQE_NUM)
-      continue;
 
     // reply a sync message to the sender
-    num_cqe = 0;
     char *str = "sync";
     memcpy(pair->ib_send_buf, str, strlen(str)+1);
     int res = post_send(pair->ib_send_buf, BUFSIZE, pair->send_mr->lkey,
                         (uint64_t)pair->ib_send_buf, pair->qp);
     CHECKM(res == 0, "Failure detected at ibv_post_send");
 
+    num_cqe = 0;
     while(num_cqe <= 0) {
       num_cqe = ibv_poll_cq(pair->cq, CQE_NUM, pair->wc);
       CHECKM(num_cqe >= 0, "Failed to poll CQ");
@@ -552,7 +539,6 @@ int ib_recv_object_chunk(client_connection *conn, plasma_request_buffer *buf)
                "Send failed with: %s", ibv_wc_status_str(pair->wc[i].status));
       }
     }
-    num_recv = 0;
   }
 
   LOG_DEBUG("Reading from mamanger %d finished", conn->slid);

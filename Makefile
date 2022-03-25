@@ -12,7 +12,7 @@ debug: all
 
 # Compile for IB support
 ib: CFLAGS += $(IBFLAGS)
-ib: CFLAGS += -g -DRAY_COMMON_DEBUG=1
+# ib: CFLAGS += -g -DRAY_COMMON_DEBUG=1
 ib: all
 
 clean:
